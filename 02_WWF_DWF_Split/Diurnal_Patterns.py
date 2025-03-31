@@ -7,6 +7,10 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import plotly.graph_objects as go
 from dash import Dash, dcc, html, Input, Output, State, callback
+
+# %%
+# Options ####
+separate_fridays = False # Option to make Friday its own group in the diurnal calculations
 # %%
 # Function to calculate base flow from a diurnal pattern
 
@@ -144,12 +148,18 @@ df_dwf_filtered = df_dwf[df_dwf["date"].isin(pd.to_datetime(selected_days).dt.da
 years = df_dwf_filtered["timestamp"].dt.year.unique()
 bc_holidays = set(holidays.CA(subdiv = "BC", years = years).keys())
 
-df_dwf_filtered.loc[:, "group"] = df_dwf_filtered["date"].apply(
-    lambda x: "Weekend/Holiday" 
-    if (x in bc_holidays or x.weekday() >= 5) 
-    else "Friday" if x.weekday() == 4  
-    else "Workday"
-)
+if separate_fridays == True:
+    df_dwf_filtered.loc[:, "group"] = df_dwf_filtered["date"].apply(
+        lambda x: "Weekend/Holiday" 
+        if (x in bc_holidays or x.weekday() >= 5) 
+        else "Friday" if x.weekday() == 4  
+        else "Workday"
+    )
+else:
+    df_dwf_filtered.loc[:, "group"] = df_dwf_filtered["date"].apply(
+        lambda x: "Weekend/Holiday" 
+        if (x in bc_holidays or x.weekday() >= 5) 
+        else "Workday")
 
 # Group and calculate mean
 df_dwf_diurnal = df_dwf_filtered.groupby(["group", "time_of_day"], as_index = False)["flow_lps"].mean()
