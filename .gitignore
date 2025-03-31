@@ -1,0 +1,5 @@
+# CSVs
+*.csv
+
+# Plots
+*.html
