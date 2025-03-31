@@ -4,8 +4,42 @@ import numpy as np
 from datetime import datetime, timedelta
 import holidays
 import matplotlib.pyplot as plt
+import seaborn as sns
 import plotly.graph_objects as go
 from dash import Dash, dcc, html, Input, Output, State, callback
+# %%
+# Function to calculate base flow from a diurnal pattern
+
+def calc_base_flow(MDF: float, ADF: float):
+    """
+    Purpose: Calculate base flow from a diurnal pattern using the Stevens - Schutzback Method
+    Inputs:
+        MDF (float): Minimum Daily Flow Rate (L/s)
+        ADF (float): Average Daily Flow Rate (L/s)
+
+    Returns:
+        BI (float): Base Infiltration (L/s)
+
+    Source: 
+        Mitchell, Paul & Stevens, Patrick & Nazaroff, Adam. (2007). QUANTIFYING BASE INFILTRATION IN SEWERS: A Comparison of Methods and a Simple Empirical Solution. Proceedings of the Water Environment Federation. 2007. 219-238. 10.2175/193864707787974805. 
+
+    """
+
+    conversion_factor = 0.022824465227271 # 0.023mgd = 1L/s
+
+    # Convert lps to mgd
+    MDF_mgd = MDF * conversion_factor
+    ADF_mgd = ADF * conversion_factor
+
+    # Stevens-Shutzbach Method Equation
+    BI_mgd = (0.4 * MDF_mgd) / (1 - 0.6 * ((MDF_mgd / ADF_mgd)**(ADF_mgd**0.7)))
+    
+    # Convert mgd to lps
+    BI = BI_mgd / conversion_factor
+
+    return BI
+
+
 # %%
 # Read in flow data from Flow_Split.py
 fp = 'Output_Data/Flow_Categorization.csv'
@@ -125,13 +159,6 @@ df_dwf_filtered = df_dwf[df_dwf["date"].isin(pd.to_datetime(selected_days).dt.da
 years = df_dwf_filtered["timestamp"].dt.year.unique()
 bc_holidays = set(holidays.CA(subdiv = "BC", years = years).keys())
 
-# Classify each fully dry day as either Weekend/Holiday or Workday
-# df_dwf_filtered.loc[:, "group"] = df_dwf_filtered["date"].apply(
-#     lambda x: "Weekend/Holiday" 
-#     if (x in bc_holidays or x.weekday() >= 5) 
-#     else "Workday"
-# )
-
 df_dwf_filtered.loc[:, "group"] = df_dwf_filtered["date"].apply(
     lambda x: "Weekend/Holiday" 
     if (x in bc_holidays or x.weekday() >= 5) 
@@ -141,16 +168,47 @@ df_dwf_filtered.loc[:, "group"] = df_dwf_filtered["date"].apply(
 
 # Group and calculate mean
 df_dwf_diurnal = df_dwf_filtered.groupby(["group", "time_of_day"], as_index = False)["flow_lps"].mean()
+df_dwf_diurnal["MDF"] = df_dwf_diurnal.groupby("group")["flow_lps"].transform("min")
+df_dwf_diurnal["ADF"] = df_dwf_diurnal.groupby("group")["flow_lps"].transform("mean")
+df_dwf_diurnal["BI"] = df_dwf_diurnal.apply(lambda row: calc_base_flow(row["MDF"], row["ADF"]), axis = 1)
+
 # %%
-fig, ax = plt.subplots(figsize = (12, 6))
+# Get unique groups
+groups = df_dwf_diurnal["group"].unique()
 
-for label, df in df_dwf_diurnal.groupby("group"):
-    ax.plot(df["time_of_day"], df["flow_lps"], label = label)
+# Create figure and subplots
+fig, axes = plt.subplots(nrows=1, ncols=len(groups), figsize=(10, 4), sharey=True)
 
-ax.grid()
-ax.set_title("Diurnal Patterns")
-ax.set_xlabel("Time of Day")
-ax.set_ylabel("Flow (L/s)")
-plt.xticks(df_dwf_diurnal["time_of_day"].unique()[::24])
-plt.legend()
+# Ensure axes is iterable even if there's only one group
+if len(groups) == 1:
+    axes = [axes]
+
+# Loop through each group and plot
+for ax, group in zip(axes, groups):
+    subset_diurnal = df_dwf_diurnal[df_dwf_diurnal["group"] == group]
+    subset_data = df_dwf_filtered[df_dwf_filtered["group"] == group]
+
+    for date, subgroup in subset_data.groupby("date"):
+        ax.plot(subgroup["time_of_day"], subgroup["flow_lps"], color = "grey", alpha = 0.5)
+    
+    line_flow, = ax.plot(subset_diurnal["time_of_day"], subset_diurnal["flow_lps"], label="Flow", color="blue")
+    line_bi, = ax.plot(subset_diurnal["time_of_day"], subset_diurnal["BI"], linestyle="--", color="red", label="BI")
+    
+
+    ax.set_title(group)
+    ax.set_xlabel("Time of Day")
+    ax.set_xticks(subset_diurnal["time_of_day"].unique()[::24])
+    ax.tick_params(axis="x", rotation=45)
+    ax.grid()
+    ax.margins(x = 0)
+    ax.legend([line_flow, line_bi], ['DWF', 'BI'], loc="upper right")
+
+
+# Set common labels
+fig.supylabel("Flow (L/s)")
+fig.suptitle("Diurnal Flow Patterns", fontsize=18)
+
+plt.tight_layout()
+plt.show()
+
 # %%
