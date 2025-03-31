@@ -70,9 +70,6 @@ df_dwf = df_input[df_input['timestamp'].dt.date.isin(full_dry_days[full_dry_days
 # %%
 # Manual Day Exclusion
 
-# Initialize series which will store the manually selected days
-selected_days = pd.Series()
-
 # Create Dash app which displays all the fully dry days in df_dwf, then allows the user to manually deselect certain days from further calculations
 app = Dash(__name__)
 
@@ -86,8 +83,7 @@ def create_figure():
             mode='lines',
             name=str(date),
             line=dict(width=1),
-            opacity=1,
-            customdata=[str(date)] * len(group)  # Store date info
+            opacity=1
         ))
 
     fig.update_layout(
@@ -100,50 +96,39 @@ def create_figure():
     )
     return fig
 
+# Define the layout of the Dash app
 app.layout = html.Div([
+    # Graph
     dcc.Graph(id="flow-graph", figure=create_figure()),
-    html.Div(id="selected-output", style={"margin": "10px 0"}),  
-    html.Button("Save Selected Days", id="save-btn", n_clicks=0),  
-    html.Div(id="save-output", style={"margin-top": "10px"})  
-])
 
-@app.callback(
-    [Output("flow-graph", "figure"),
-     Output("selected-output", "children")],
-    [Input("flow-graph", "clickData")],
-    prevent_initial_call=True  
+    # Button
+    html.Button("Save Selected Days", id="save-btn", n_clicks=0), 
+
+    # Confirmation Message 
+    html.Div(id="save-output", style={"margin-top": "10px"})
+],
+    style = {"backgroundColor": "white"}
 )
-def toggle_visibility(click_data):
-    """Toggle visibility of the clicked line."""
-    fig = create_figure()  
-
-    if click_data:
-        clicked_date = click_data["points"][0]["customdata"]  
-        for trace in fig.data:
-            if trace.name == clicked_date:
-                trace.visible = 'legendonly' if trace.visible is True else True
-
-    # Track visible traces
-    visible_dates = [trace.name for trace in fig.data if trace.visible is True]
-
-    return fig
 
 @app.callback(
-    Output("save-output", "children"),
-    [Input("save-btn", "n_clicks")],
-    [State("flow-graph", "figure")]
+    Output("save-output", "children"), # Send confirmation message to output
+    [Input("save-btn", "n_clicks")], # Triggered when button is clicked
+    [State("flow-graph", "figure")] # Reads the figure state to get visible traces
 )
 def save_selected_days(n_clicks, fig):
     """Store Selected Days in a DataFrame."""
     global selected_days  # Allow modifying the global DataFrame
 
     if n_clicks > 0:
+        # Get all currently visible dates
         visible_dates = [trace["name"] for trace in fig["data"] if trace.get("visible", True) is True]
 
         # Update the global DataFrame
         selected_days = pd.Series(visible_dates)
 
-    return None
+        # Confirmation message
+        return "Saved selected days."
+    return "Days not yet saved."
 
 if __name__ == "__main__":
     app.run_server(debug=True)
@@ -177,7 +162,7 @@ df_dwf_diurnal["BI"] = df_dwf_diurnal.apply(lambda row: calc_base_flow(row["MDF"
 groups = df_dwf_diurnal["group"].unique()
 
 # Create figure and subplots
-fig, axes = plt.subplots(nrows=1, ncols=len(groups), figsize=(10, 4), sharey=True)
+fig, axes = plt.subplots(nrows=1, ncols=len(groups), figsize=(16, 9), sharey=True)
 
 # Ensure axes is iterable even if there's only one group
 if len(groups) == 1:
@@ -211,4 +196,7 @@ fig.suptitle("Diurnal Flow Patterns", fontsize=18)
 plt.tight_layout()
 plt.show()
 
+# %%
+# Save diurnal patterns to csv
+df_dwf_diurnal.to_csv("Output_Data/Diurnal_Patterns.csv", index = False)
 # %%
