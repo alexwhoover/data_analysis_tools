@@ -18,11 +18,11 @@ def calc_base_flow(MDF: float, ADF: float):
     """
     Purpose: Calculate base flow from a diurnal pattern using the Stevens - Schutzback Method
     Inputs:
-        MDF (float): Minimum Daily Flow Rate (L/s)
-        ADF (float): Average Daily Flow Rate (L/s)
+        MDF (float): Minimum Daily Flow Rate (L/s) (I am calling this MNF)
+        ADF (float): Average Daily Flow Rate (L/s) (I am calling this ADWF)
 
     Returns:
-        BI (float): Base Infiltration (L/s)
+        BI (float): Base Infiltration (L/s) (I am calling this GWI)
 
     Source: 
         Mitchell, Paul & Stevens, Patrick & Nazaroff, Adam. (2007). QUANTIFYING BASE INFILTRATION IN SEWERS: A Comparison of Methods and a Simple Empirical Solution. Proceedings of the Water Environment Federation. 2007. 219-238. 10.2175/193864707787974805. 
@@ -163,9 +163,11 @@ else:
 
 # Group and calculate mean
 df_dwf_diurnal = df_dwf_filtered.groupby(["group", "time_of_day"], as_index = False)["flow_lps"].mean()
-df_dwf_diurnal["MDF"] = df_dwf_diurnal.groupby("group")["flow_lps"].transform("min")
-df_dwf_diurnal["ADF"] = df_dwf_diurnal.groupby("group")["flow_lps"].transform("mean")
-df_dwf_diurnal["BI"] = df_dwf_diurnal.apply(lambda row: calc_base_flow(row["MDF"], row["ADF"]), axis = 1)
+df_dwf_diurnal.rename(columns = {"flow_lps": "DWF"}, inplace = True)
+df_dwf_diurnal["MNF"] = df_dwf_diurnal.groupby("group")["DWF"].transform("min") # Minimum Nighttime Flow (MNF)
+df_dwf_diurnal["ADWF"] = df_dwf_diurnal.groupby("group")["DWF"].transform("mean") # Average Dry Weather Flow (ADWF)
+df_dwf_diurnal["GWI"] = df_dwf_diurnal.apply(lambda row: calc_base_flow(row["MNF"], row["ADWF"]), axis = 1) # Ground Water Infiltration
+df_dwf_diurnal["SF"] = df_dwf_diurnal["DWF"] - df_dwf_diurnal["GWI"]
 
 # %%
 # Get unique groups
@@ -186,8 +188,8 @@ for ax, group in zip(axes, groups):
     for date, subgroup in subset_data.groupby("date"):
         ax.plot(subgroup["time_of_day"], subgroup["flow_lps"], color = "grey", alpha = 0.5)
     
-    line_flow, = ax.plot(subset_diurnal["time_of_day"], subset_diurnal["flow_lps"], label="Flow", color="blue")
-    line_bi, = ax.plot(subset_diurnal["time_of_day"], subset_diurnal["BI"], linestyle="--", color="red", label="BI")
+    line_dwf, = ax.plot(subset_diurnal["time_of_day"], subset_diurnal["DWF"], label="Flow", color="blue")
+    line_gwi, = ax.plot(subset_diurnal["time_of_day"], subset_diurnal["GWI"], linestyle="--", color="red", label="BI")
     
 
     ax.set_title(group)
@@ -196,7 +198,7 @@ for ax, group in zip(axes, groups):
     ax.tick_params(axis="x", rotation=45)
     ax.grid()
     ax.margins(x = 0)
-    ax.legend([line_flow, line_bi], ['DWF', 'BI'], loc="upper right")
+    ax.legend([line_dwf, line_gwi], ['DWF Pattern', 'GWI'], loc="upper right")
 
 
 # Set common labels
@@ -208,5 +210,5 @@ plt.show()
 
 # %%
 # Save diurnal patterns to csv
-df_dwf_diurnal.to_csv("Output_Data/Diurnal_Patterns.csv", index = False)
+df_dwf_diurnal.to_csv("Output_Data/DWF_Patterns.csv", index = False)
 # %%
