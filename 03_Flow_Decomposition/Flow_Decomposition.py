@@ -177,6 +177,6 @@ fig2.show()
 # Save plot and data
 pio.write_html(fig, "Output_Data/Flow_Decomposition_Plot.html")
 pio.write_html(fig2, "Output_Data/Flow_Decomposition_Stacked_Plot.html")
-df_export = df_comb[["timestamp", "depth_mm", "velocity_mps", "flow_lps", "DWF", "RDII", "SF", "GWI"]]
+df_export = df_comb[["timestamp", "rainfall_mm", "depth_mm", "velocity_mps", "flow_lps", "DWF", "RDII", "SF", "GWI"]]
 df_export.to_csv("Output_Data/Flow_Decomposition.csv", index = False)
 # %%

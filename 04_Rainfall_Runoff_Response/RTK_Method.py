@@ -4,11 +4,13 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import math
-from scipy.signal import find_peaks
+from scipy.signal import find_peaks, peak_prominences
 import plotly.graph_objects as go
 import plotly.io as pio
 from plotly.subplots import make_subplots
+from datetime import datetime, timedelta
 
+# Libraries for genetic algorithm
 from pymoo.core.callback import Callback
 from pymoo.core.problem import ElementwiseProblem
 from pymoo.algorithms.soo.nonconvex.ga import GA
@@ -22,9 +24,10 @@ from pymoo.termination.default import DefaultSingleObjectiveTermination
 # %% [markdown]
 # ### Data Import and Exploration
 # %%
-# Import Sample Data for ANG_COM002
 # TODO: Import Data
-df_rdii = pd.read_csv("Inputs/BLC_STM013.csv")
+df_rdii = (pd.read_csv("Input_Data/Flow_Decomposition.csv")
+    .assign(timestamp = lambda df: pd.to_datetime(df['timestamp']))
+)
 
 # %% [markdown]
 # ### Define Functions to Convert RTK & Rainfall to Simulated RDII
@@ -114,7 +117,69 @@ def RTK(x, P, A):
 
     return simulated_flow
 
+def find_storms(Q, prominence, num_peaks):
 
+    # Find all peaks with at least prominence = prominence
+    peaks, _ = find_peaks(Q, prominence = prominence)
+
+    # Get prominence values for all peaks found
+    prominences = peak_prominences(Q, peaks)[0]
+
+    # Sort the peaks by prominence, descending
+    top_indices = sorted(range(len(prominences)), key=lambda i: prominences[i], reverse=True)[:num_peaks]
+
+    # Get the actual indices in Q of the [num_peaks] most prominent peaks
+    top_peaks = peaks[top_indices]
+
+    return top_peaks
+
+def calculate_flow_events(df_input, min_intensity_mm_hr = 0.1, rolling_window_hr = 6, response_time_hr = 24, inter_event_duration_hr = 24, min_event_duration_hr = 1, lead_time_hr = 2):
+    window_size = int(rolling_window_hr * 60 / 5)
+
+    # Calculate rolling sum of precip, then convert to intensity
+    # Duration of intensity calculation = rolling_window_hr
+    df_input['rainfall_roll_sum'] = df_input['rainfall_mm'].rolling(window = window_size).sum()
+    df_input['rainfall_roll_sum_intensity'] = df_input['rainfall_roll_sum'] / rolling_window_hr
+
+    # Initialize the wet_weather_event column with 0
+    df_input['wet_weather_event'] = 0
+
+    # Identify potential events based on intensity threshold
+    # event_indices is a list of all indices with precip >= threshold
+    event_indices = df_input.index[
+        df_input['rainfall_roll_sum_intensity'] >= min_intensity_mm_hr
+    ].tolist()
+
+    # If there are no rainfall events, return df_input
+    if not event_indices:
+        return df_input
+    
+    # Combine events within the inter-event duration using timestamps
+    current_event_start = df_input.loc[event_indices[0], 'timestamp']
+    current_event_end = df_input.loc[event_indices[0], 'timestamp']
+
+    for i in range(1, len(event_indices)):
+        current_timestamp = df_input.loc[event_indices[i], 'timestamp']
+
+        # If two timestamps above threshold are within inter-event duration, change event end
+        if (current_timestamp - current_event_end).total_seconds() <= (inter_event_duration_hr * 3600):
+            current_event_end = current_timestamp
+
+        # Once the next timestamp above threshold is outside of inter-event duration, check if event duration meets minimum requirement
+        elif (current_event_end - current_event_start).total_seconds() >= (min_event_duration_hr * 3600):
+            # If minimum requirement met, mark as storm
+            df_input.loc[
+                (df_input['timestamp'] >= (current_event_start - timedelta(hours = lead_time_hr))) & (df_input['timestamp'] <= (current_event_end + timedelta(hours = response_time_hr))),
+                'wet_weather_event'
+            ] = 1
+
+            current_event_start = current_timestamp
+            current_event_end = current_timestamp
+
+    # Add a column showing periods with NA values in flow or precip
+    df_input['missing_data'] = (~((~df_input['rainfall_mm'].isnull()) & (~df_input['flow_lps'].isnull()))).astype(int)
+    
+    return df_input
 
 # %%
 # TODO: Fitness Function
@@ -239,6 +304,9 @@ def plot_synthetic_hydrograph(x):
     ax.plot(np.arange(0, len(UH3) * 5, 5), UH3, alpha = 1, color = 'b')
     ax.set_xlabel("Time (minutes)")
     ax.set_ylabel("Flow (L/s)/(mm-ha)")
+    ax.grid()
+
+    plt.savefig('Output_Data/RTK_Unit_Hydrograph.png')
 
     return None
 
@@ -246,11 +314,9 @@ def plot_synthetic_hydrograph(x):
 # Inputs:
 # - Q: Time-series
 # - prominence (float): 
-def plot_peaks(Q, prominence):
-    peaks, _ = find_peaks(Q, prominence = prominence)
-
+def plot_peaks(Q, peak_indices):
     plt.plot(Q)
-    plt.plot(peaks, Q[peaks], "x")
+    plt.plot(peak_indices, Q[peak_indices], "x")
     plt.show()
 
 def plot_simulated_flow(x, P, A, Q, timestamp):
@@ -320,7 +386,7 @@ def plot_simulated_flow_dynamic(x, P, A, Q, timestamp, save_file = False):
     fig.show()
     
     if save_file == True:
-        pio.write_html(fig, file="plot.html", auto_open=True)
+        pio.write_html(fig, file="Output_Data/Comparison_Plot.html", auto_open=True)
 
     return None
 
@@ -351,11 +417,11 @@ class MyProblem(ElementwiseProblem):
         fitness_score = fitness_function(x, self.P, self.A, self.Q)
 
         # Set the objective value
-        out["F"] = fitness_score
+        out["F"] = fitness_score # Evaluation Metric: Kling-Gupta Efficiency (KGE)
 
-        Rs = x[0] + x[3] + x[6] # Sum of R values
+        Rs = x[0] + x[3] + x[6] # Sum of runoff coefficient (R) values
 
-        out["G"] = Rs - self.Ro # Sum of R values should be less than 1
+        out["G"] = Rs - self.Ro # Constraint: Sum of R values should be less than 1
 
 
 # %%
@@ -375,9 +441,9 @@ class MyCallback(Callback):
 
 # %%
 # TODO: Set Parameters
-A = 10.525275  # ha
+A = 107.448671  # ha
 P = np.array(df_rdii['rainfall_mm'])
-Q = np.array(df_rdii['RDII_lps'])
+Q = np.array(df_rdii['RDII'])
 V_rain = np.nansum(P) * (1/1000) * A * 10000 * 1000 # Litres
 V_RDII = np.nansum(Q) * 300 # Litres
 Ro = V_RDII/V_rain
@@ -387,6 +453,12 @@ weight = 10
 pop_size = 500
 max_gens = 200
 
+# %%
+test = find_storms(Q, prominence, num_peaks = 50)
+plot_peaks(Q, test)
+
+# %%
+test2 = calculate_flow_events(df_rdii)
 # %%
 # TODO: Initialize Problem
 # Create an instance of the problem
@@ -431,14 +503,16 @@ Volume_Ratio = Q_tot / Q_sim_tot
 R_Ratio = Ro / (res.X[0] + res.X[3] + res.X[6])
 
 # Print the best solution found
-print("RTK1: %s" % res.X[0:3])
-print("RTK2: %s" % res.X[3:6])
-print("RTK3: %s" % res.X[6:9])
-print("Function value: %.4f" % res.F[0])
-print("KGE: %.4f" % obj_fun_kge(Q, Q_sim))
-print("RMSE: %.4f" % obj_fun_rmse(Q, Q_sim))
-print("Total Flow / Total Simulated Flow: %.4f" % Volume_Ratio)
-print("Actual Runoff Ratio / Simulated Runoff Ratio: %.4f" % R_Ratio)
+f = open("Output_Data/RTK_Results.txt", "x")
+
+f.write("RTK1: %s\n" % res.X[0:3])
+f.write("RTK2: %s\n" % res.X[3:6])
+f.write("RTK3: %s\n" % res.X[6:9])
+f.write("KGE: %.4f\n" % obj_fun_kge(Q, Q_sim))
+f.write("RMSE: %.4f\n" % obj_fun_rmse(Q, Q_sim))
+f.write("Total Flow / Total Simulated Flow: %.4f\n" % Volume_Ratio)
+f.write("Actual Runoff Ratio / Simulated Runoff Ratio: %.4f\n" % R_Ratio)
+f.close()
 
 # %%
 # TODO: Plot Best Solution
