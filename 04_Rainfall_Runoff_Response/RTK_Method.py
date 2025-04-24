@@ -10,6 +10,11 @@ import plotly.io as pio
 from plotly.subplots import make_subplots
 from datetime import datetime, timedelta
 
+# Dash App
+import dash
+from dash import html, dcc, Output, Input, State, ctx
+import plotly.graph_objs as go
+
 # Libraries for genetic algorithm
 from pymoo.core.callback import Callback
 from pymoo.core.problem import ElementwiseProblem
@@ -28,6 +33,127 @@ from pymoo.termination.default import DefaultSingleObjectiveTermination
 df_rdii = (pd.read_csv("Input_Data/Flow_Decomposition.csv")
     .assign(timestamp = lambda df: pd.to_datetime(df['timestamp']))
 )
+
+
+# %%
+# TODO: Storm Selection App
+app = dash.Dash(__name__)
+server = app.server
+
+# Define App Layout
+app.layout = html.Div([
+    html.Div([
+        html.H1("Define Periods"),
+
+        # Div to choose / display all the storm start and end times
+        html.Div(id = "period-container", children = []),
+
+        # Buttons to add / subtract number of storms
+        html.Button("Add Period", id = "add-period-btn", n_clicks = 0),
+        html.Button("Remove Period", id = "remove-period-btn", n_clicks = 0),
+        html.Div(id = "store-periods", style = {"display": "none"})
+    ], style={'width': '30%', 'display': 'inline-block', 'verticalAlign': 'top', 'padding': '10px'}),
+
+    html.Div([
+        dcc.Graph(id = "rainfall-graph")
+    ], style={'width': '68%', 'display': 'inline-block', 'padding': '10px'})
+])
+
+# Define logic for adding and removing date start / end boxes
+@app.callback(
+    Output('period-container', 'children'),
+    Input('add-period-btn', 'n_clicks'),
+    Input('remove-period-btn', 'n_clicks'),
+    State({'type': 'period-picker', 'index': dash.ALL}, 'start_date'),
+    State({'type': 'period-picker', 'index': dash.ALL}, 'end_date')
+)
+def update_period_inputs(add_clicks, remove_clicks, start_dates, end_dates):
+
+    # Limit storms to 1 - 10
+    delta = add_clicks - remove_clicks + 1
+    
+    if 1 <= delta <= 10:
+        new_count = delta
+    elif delta < 1:
+        new_count = 1
+    elif delta > 10:
+        new_count = 10
+
+    # Add / Remove Periods
+    new_children = []
+    for i in range(new_count):
+        start_date = start_dates[i] if i < len(start_dates) else None
+        end_date = end_dates[i] if i < len(end_dates) else None
+        new_children.extend([
+            html.Div([
+                dcc.DatePickerRange(
+                    id={'type': 'period-picker', 'index': i},
+                    min_date_allowed=df_rdii['timestamp'].min().date(),
+                    max_date_allowed=df_rdii['timestamp'].max().date(),
+                    display_format='YYYY-MM-DD',
+                    start_date=start_date,
+                    end_date=end_date
+                ),
+                html.Br()
+            ])
+        ])
+    return new_children
+
+@app.callback(
+    Output('rainfall-graph', 'figure'),
+    Input({'type': 'period-picker', 'index': dash.ALL}, 'start_date'),
+    Input({'type': 'period-picker', 'index': dash.ALL}, 'end_date')
+)
+def update_graph(start_dates, end_dates):
+    fig = make_subplots(rows = 2, cols = 1, shared_xaxes = True)
+
+    fig.add_trace(go.Scatter(
+        x=df_rdii["timestamp"],
+        y=df_rdii["rainfall_mm"],
+        mode="lines",
+        name="Rainfall (mm)",
+        line=dict(color="darkblue", width=1),
+        fill="tozeroy",
+        opacity=0.2
+    ), row=1, col=1)
+
+    fig.add_trace(go.Scatter(
+        x=df_rdii["timestamp"],
+        y=df_rdii["RDII"],
+        mode="lines",
+        name="RDII (L/s)",
+        line=dict(color="green", width=1)
+    ), row=2, col=1)
+
+    # Highlight periods on graph
+    for i, (start, end) in enumerate(zip(start_dates, end_dates)):
+        if start and end:
+            fig.add_vrect(
+                x0=start,
+                x1=end,
+                fillcolor="rgba(255, 0, 0, 0.2)",
+                opacity=0.4,
+                layer="below",
+                line_width=0,
+                annotation_text=f"Period {i+1}",
+                annotation_position="top left",
+            )
+
+    fig.update_layout(
+        title="Storm Selector", 
+        xaxis_title="Timestamp", 
+        yaxis_title="Rainfall (mm)",
+        yaxis2_title="RDII (L/s)",
+        xaxis2_rangeslider_visible=True, 
+        xaxis2_rangeslider_thickness=0.1
+    )
+    global storm_dates
+    storm_dates = pd.DataFrame(data = {'start_date': pd.to_datetime(start_dates), 'end_date': pd.to_datetime(end_dates)})
+
+    return fig
+
+if __name__ == '__main__':
+    app.run_server(debug=True)
 
 # %% [markdown]
 # ### Define Functions to Convert RTK & Rainfall to Simulated RDII
@@ -102,84 +228,90 @@ def RTK(x, P, A):
     # Fill all nan values in precip time series with 0
     # This assumes there are no major gaps in precip time series
     P_filled = np.where(np.isnan(P), 0.0, P)
+    simulated_flow = np.zeros_like(P_filled)
 
     R1, T1, K1, R2, T2, K2, R3, T3, K3 = x
 
-    UH1 = unit_hydrograph(R1, T1, K1)
-    UH2 = unit_hydrograph(R2, T2, K2)
-    UH3 = unit_hydrograph(R3, T3, K3)
+    if R1 >= 0.05:
+        UH1 = unit_hydrograph(R1, T1, K1)
+        Q1 = transform_rainfall_with_UH(P_filled, A, UH1)
+        simulated_flow += Q1
 
-    Q1 = transform_rainfall_with_UH(P_filled, A, UH1)
-    Q2 = transform_rainfall_with_UH(P_filled, A, UH2)
-    Q3 = transform_rainfall_with_UH(P_filled, A, UH3)
+    if R2 >= 0.05:
+        UH2 = unit_hydrograph(R2, T2, K2)
+        Q2 = transform_rainfall_with_UH(P_filled, A, UH2)
+        simulated_flow += Q2
 
-    simulated_flow = np.add(Q1, Q2, Q3)
+    if R3 >= 0.05:
+        UH3 = unit_hydrograph(R3, T3, K3)
+        Q3 = transform_rainfall_with_UH(P_filled, A, UH3)
+        simulated_flow += Q3
 
     return simulated_flow
 
-def find_storms(Q, prominence, num_peaks):
+# def find_storms(Q, prominence, num_peaks):
 
-    # Find all peaks with at least prominence = prominence
-    peaks, _ = find_peaks(Q, prominence = prominence)
+#     # Find all peaks with at least prominence = prominence
+#     peaks, _ = find_peaks(Q, prominence = prominence)
 
-    # Get prominence values for all peaks found
-    prominences = peak_prominences(Q, peaks)[0]
+#     # Get prominence values for all peaks found
+#     prominences = peak_prominences(Q, peaks)[0]
 
-    # Sort the peaks by prominence, descending
-    top_indices = sorted(range(len(prominences)), key=lambda i: prominences[i], reverse=True)[:num_peaks]
+#     # Sort the peaks by prominence, descending
+#     top_indices = sorted(range(len(prominences)), key=lambda i: prominences[i], reverse=True)[:num_peaks]
 
-    # Get the actual indices in Q of the [num_peaks] most prominent peaks
-    top_peaks = peaks[top_indices]
+#     # Get the actual indices in Q of the [num_peaks] most prominent peaks
+#     top_peaks = peaks[top_indices]
 
-    return top_peaks
+#     return top_peaks
 
-def calculate_flow_events(df_input, min_intensity_mm_hr = 0.1, rolling_window_hr = 6, response_time_hr = 24, inter_event_duration_hr = 24, min_event_duration_hr = 1, lead_time_hr = 2):
-    window_size = int(rolling_window_hr * 60 / 5)
+# def calculate_flow_events(df_input, min_intensity_mm_hr = 0.1, rolling_window_hr = 6, response_time_hr = 24, inter_event_duration_hr = 24, min_event_duration_hr = 1, lead_time_hr = 2):
+#     window_size = int(rolling_window_hr * 60 / 5)
 
-    # Calculate rolling sum of precip, then convert to intensity
-    # Duration of intensity calculation = rolling_window_hr
-    df_input['rainfall_roll_sum'] = df_input['rainfall_mm'].rolling(window = window_size).sum()
-    df_input['rainfall_roll_sum_intensity'] = df_input['rainfall_roll_sum'] / rolling_window_hr
+#     # Calculate rolling sum of precip, then convert to intensity
+#     # Duration of intensity calculation = rolling_window_hr
+#     df_input['rainfall_roll_sum'] = df_input['rainfall_mm'].rolling(window = window_size).sum()
+#     df_input['rainfall_roll_sum_intensity'] = df_input['rainfall_roll_sum'] / rolling_window_hr
 
-    # Initialize the wet_weather_event column with 0
-    df_input['wet_weather_event'] = 0
+#     # Initialize the wet_weather_event column with 0
+#     df_input['wet_weather_event'] = 0
 
-    # Identify potential events based on intensity threshold
-    # event_indices is a list of all indices with precip >= threshold
-    event_indices = df_input.index[
-        df_input['rainfall_roll_sum_intensity'] >= min_intensity_mm_hr
-    ].tolist()
+#     # Identify potential events based on intensity threshold
+#     # event_indices is a list of all indices with precip >= threshold
+#     event_indices = df_input.index[
+#         df_input['rainfall_roll_sum_intensity'] >= min_intensity_mm_hr
+#     ].tolist()
 
-    # If there are no rainfall events, return df_input
-    if not event_indices:
-        return df_input
+#     # If there are no rainfall events, return df_input
+#     if not event_indices:
+#         return df_input
     
-    # Combine events within the inter-event duration using timestamps
-    current_event_start = df_input.loc[event_indices[0], 'timestamp']
-    current_event_end = df_input.loc[event_indices[0], 'timestamp']
+#     # Combine events within the inter-event duration using timestamps
+#     current_event_start = df_input.loc[event_indices[0], 'timestamp']
+#     current_event_end = df_input.loc[event_indices[0], 'timestamp']
 
-    for i in range(1, len(event_indices)):
-        current_timestamp = df_input.loc[event_indices[i], 'timestamp']
+#     for i in range(1, len(event_indices)):
+#         current_timestamp = df_input.loc[event_indices[i], 'timestamp']
 
-        # If two timestamps above threshold are within inter-event duration, change event end
-        if (current_timestamp - current_event_end).total_seconds() <= (inter_event_duration_hr * 3600):
-            current_event_end = current_timestamp
+#         # If two timestamps above threshold are within inter-event duration, change event end
+#         if (current_timestamp - current_event_end).total_seconds() <= (inter_event_duration_hr * 3600):
+#             current_event_end = current_timestamp
 
-        # Once the next timestamp above threshold is outside of inter-event duration, check if event duration meets minimum requirement
-        elif (current_event_end - current_event_start).total_seconds() >= (min_event_duration_hr * 3600):
-            # If minimum requirement met, mark as storm
-            df_input.loc[
-                (df_input['timestamp'] >= (current_event_start - timedelta(hours = lead_time_hr))) & (df_input['timestamp'] <= (current_event_end + timedelta(hours = response_time_hr))),
-                'wet_weather_event'
-            ] = 1
+#         # Once the next timestamp above threshold is outside of inter-event duration, check if event duration meets minimum requirement
+#         elif (current_event_end - current_event_start).total_seconds() >= (min_event_duration_hr * 3600):
+#             # If minimum requirement met, mark as storm
+#             df_input.loc[
+#                 (df_input['timestamp'] >= (current_event_start - timedelta(hours = lead_time_hr))) & (df_input['timestamp'] <= (current_event_end + timedelta(hours = response_time_hr))),
+#                 'wet_weather_event'
+#             ] = 1
 
-            current_event_start = current_timestamp
-            current_event_end = current_timestamp
+#             current_event_start = current_timestamp
+#             current_event_end = current_timestamp
 
-    # Add a column showing periods with NA values in flow or precip
-    df_input['missing_data'] = (~((~df_input['rainfall_mm'].isnull()) & (~df_input['flow_lps'].isnull()))).astype(int)
+#     # Add a column showing periods with NA values in flow or precip
+#     df_input['missing_data'] = (~((~df_input['rainfall_mm'].isnull()) & (~df_input['flow_lps'].isnull()))).astype(int)
     
-    return df_input
+#     return df_input
 
 # %%
 # TODO: Fitness Function
@@ -265,14 +397,17 @@ def obj_fun_rmse(Qobs, Qsim):
 # Outputs:
 # - (1 - KGE) (float): A metric to evaluate solution performance during training
 
-def fitness_function(x, P, A, Qobs):
+def fitness_function(x, P, A, Qobs, mask):
     # Calculate Simulated Flow
     Qsim = RTK(x, P, A)
+
+    Qobs_masked = Qobs[mask]
+    Qsim_masked = Qsim[mask]
 
     # Compute Kling Gupta Efficiency Metric
     # Range is (-Inf, 1], where 1 is the optimal number
     # Since the GA is set up as a minimization problem where 0 is optimal, we instead return 1 - KGE
-    KGE = obj_fun_kge(Qobs, Qsim)
+    KGE = obj_fun_kge(Qobs_masked, Qsim_masked)
 
     return 1 - KGE
     
@@ -282,32 +417,80 @@ def fitness_function(x, P, A, Qobs):
 # - x = [R1, T1, K1, R2, T2, K2, R3, T3, K3] is the RTK parameters
 # Output:
 # - None
+# def plot_synthetic_hydrograph(x):
+#     R1, T1, K1, R2, T2, K2, R3, T3, K3 = x
+
+#     UH1 = unit_hydrograph(R1, T1, K1)
+#     UH2 = unit_hydrograph(R2, T2, K2)
+#     UH3 = unit_hydrograph(R3, T3, K3)
+
+#     max_length = max(len(UH1), len(UH2), len(UH3))
+#     UH1_padded = np.pad(UH1, (0, max_length - len(UH1)))
+#     UH2_padded = np.pad(UH2, (0, max_length - len(UH2)))
+#     UH3_padded = np.pad(UH3, (0, max_length - len(UH3)))
+
+#     hydrograph = UH1_padded + UH2_padded + UH3_padded
+
+#     fig, ax = plt.subplots(figsize = (8, 6))
+
+#     ax.plot(np.arange(0, max_length * 5, 5), hydrograph, alpha = 1, color = 'black', label = "Synthetic RTK Hydrograph")
+#     ax.plot(np.arange(0, len(UH1) * 5, 5), UH1, alpha = 1, color = 'r')
+#     ax.plot(np.arange(0, len(UH2) * 5, 5), UH2, alpha = 1, color = 'g')
+#     ax.plot(np.arange(0, len(UH3) * 5, 5), UH3, alpha = 1, color = 'b')
+#     ax.set_xlabel("Time (minutes)")
+#     ax.set_ylabel("Flow (L/s)/(mm-ha)")
+#     ax.grid()
+
+#     plt.savefig('Output_Data/RTK_Unit_Hydrograph.png')
+
+#     return None
+
 def plot_synthetic_hydrograph(x):
     R1, T1, K1, R2, T2, K2, R3, T3, K3 = x
 
-    UH1 = unit_hydrograph(R1, T1, K1)
-    UH2 = unit_hydrograph(R2, T2, K2)
-    UH3 = unit_hydrograph(R3, T3, K3)
+    hydrographs = []
+    colors = []
+    labels = []
 
-    max_length = max(len(UH1), len(UH2), len(UH3))
-    UH1_padded = np.pad(UH1, (0, max_length - len(UH1)))
-    UH2_padded = np.pad(UH2, (0, max_length - len(UH2)))
-    UH3_padded = np.pad(UH3, (0, max_length - len(UH3)))
+    if R1 >= 0.05:
+        UH1 = unit_hydrograph(R1, T1, K1)
+        hydrographs.append(UH1)
+        colors.append('r')
+        labels.append('UH1')
 
-    hydrograph = UH1_padded + UH2_padded + UH3_padded
+    if R2 >= 0.05:
+        UH2 = unit_hydrograph(R2, T2, K2)
+        hydrographs.append(UH2)
+        colors.append('g')
+        labels.append('UH2')
 
-    fig, ax = plt.subplots(figsize = (8, 6))
+    if R3 >= 0.05:
+        UH3 = unit_hydrograph(R3, T3, K3)
+        hydrographs.append(UH3)
+        colors.append('b')
+        labels.append('UH3')
 
-    ax.plot(np.arange(0, max_length * 5, 5), hydrograph, alpha = 1, color = 'black', label = "Synthetic RTK Hydrograph")
-    ax.plot(np.arange(0, len(UH1) * 5, 5), UH1, alpha = 1, color = 'r')
-    ax.plot(np.arange(0, len(UH2) * 5, 5), UH2, alpha = 1, color = 'g')
-    ax.plot(np.arange(0, len(UH3) * 5, 5), UH3, alpha = 1, color = 'b')
+    if not hydrographs:
+        print("No unit hydrographs above the threshold.")
+        return None
+
+    max_length = max(len(uh) for uh in hydrographs)
+    padded_hydrographs = [np.pad(uh, (0, max_length - len(uh))) for uh in hydrographs]
+
+    synthetic_hydrograph = np.sum(padded_hydrographs, axis=0)
+
+    fig, ax = plt.subplots(figsize=(8, 6))
+    ax.plot(np.arange(0, max_length * 5, 5), synthetic_hydrograph, color='black', label="Synthetic RTK Hydrograph")
+
+    for uh, color, label in zip(hydrographs, colors, labels):
+        ax.plot(np.arange(0, len(uh) * 5, 5), uh, color=color, label=label)
+
     ax.set_xlabel("Time (minutes)")
     ax.set_ylabel("Flow (L/s)/(mm-ha)")
     ax.grid()
+    ax.legend()
 
     plt.savefig('Output_Data/RTK_Unit_Hydrograph.png')
-
     return None
 
 # Highlight the local maxima of a time-series, Q, in a plot. Only local maxima of a certain prominence are shown. Prominence is a measure of peak magnitude relative to nearby peaks.
@@ -377,7 +560,7 @@ def plot_simulated_flow_dynamic(x, P, A, Q, timestamp, save_file = False):
 
 
     fig.update_layout(
-        xaxis_title="Time (min)",
+        xaxis2_title="Time (min)",
         yaxis_title="Flow (L/s)",
         yaxis2=dict(title="Precipitation (mm)"),  # Second plot y-axis title
         template="plotly_white"
@@ -395,7 +578,7 @@ def plot_simulated_flow_dynamic(x, P, A, Q, timestamp, save_file = False):
 # TODO: Define the problem class
 class MyProblem(ElementwiseProblem):
 
-    def __init__(self, P: np.ndarray, A: float, Q: np.ndarray, Ro: float):
+    def __init__(self, P: np.ndarray, A: float, Q: np.ndarray, Ro: float, mask: pd.Series):
         # Define parameter bounds
         R_bounds = (0, 1)
         T_bounds = (0, 24)
@@ -409,12 +592,13 @@ class MyProblem(ElementwiseProblem):
         self.A = A
         self.Q = Q
         self.Ro = Ro
+        self.mask = mask
         
         super().__init__(n_var=9, n_obj=1, n_constr=1, xl=xl, xu=xu)
 
     def _evaluate(self, x, out, *args, **kwargs):
         # Define the model or function to evaluate RMSE
-        fitness_score = fitness_function(x, self.P, self.A, self.Q)
+        fitness_score = fitness_function(x, self.P, self.A, self.Q, self.mask)
 
         # Set the objective value
         out["F"] = fitness_score # Evaluation Metric: Kling-Gupta Efficiency (KGE)
@@ -450,15 +634,11 @@ Ro = V_RDII/V_rain
 timestamp = np.array(df_rdii['timestamp'])
 prominence = 50
 weight = 10
-pop_size = 500
-max_gens = 200
-
-# %%
-test = find_storms(Q, prominence, num_peaks = 50)
-plot_peaks(Q, test)
-
-# %%
-test2 = calculate_flow_events(df_rdii)
+pop_size = 400
+max_gens = 50
+mask = pd.Series([False] * len(df_rdii))
+for _, row in storm_dates.iterrows():
+    mask |= (df_rdii['timestamp'] >= row['start_date']) & (df_rdii['timestamp'] <= row['end_date'])
 # %%
 # TODO: Initialize Problem
 # Create an instance of the problem
@@ -466,7 +646,8 @@ problem = MyProblem(
     P = P,
     A = A,
     Q = Q,
-    Ro = Ro
+    Ro = Ro,
+    mask = mask
 )
 
 # Define the genetic algorithm
