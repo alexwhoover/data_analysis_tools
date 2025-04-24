@@ -12,7 +12,7 @@ from datetime import datetime, timedelta
 
 # Dash App
 import dash
-from dash import html, dcc, Output, Input, State, ctx
+from dash import html, dcc, Output, Input, State
 import plotly.graph_objs as go
 
 # Libraries for genetic algorithm
@@ -25,18 +25,28 @@ from pymoo.operators.crossover.sbx import SBX
 from pymoo.operators.mutation.pm import PM
 from pymoo.termination.default import DefaultSingleObjectiveTermination
 
-
-# %% [markdown]
-# ### Data Import and Exploration
 # %%
-# TODO: Import Data
+##############################################################################
+##############################################################################
+##############################################################################
+# TODO: Set Parameters
+A = 107.448671  # Set Catchment Area in Hectares
+pop_size = 400  # Set initial population size
+max_gens = 200  # Set the maximum number of generations before termination
+##############################################################################
+##############################################################################
+##############################################################################
+
+
+# %%
+# Import Data
 df_rdii = (pd.read_csv("Input_Data/Flow_Decomposition.csv")
     .assign(timestamp = lambda df: pd.to_datetime(df['timestamp']))
 )
 
 
 # %%
-# TODO: Storm Selection App
+# Storm Selection App
 app = dash.Dash(__name__)
 server = app.server
 
@@ -99,6 +109,7 @@ def update_period_inputs(add_clicks, remove_clicks, start_dates, end_dates):
         ])
     return new_children
 
+# Define logic for updating graph
 @app.callback(
     Output('rainfall-graph', 'figure'),
     Input({'type': 'period-picker', 'index': dash.ALL}, 'start_date'),
@@ -147,11 +158,14 @@ def update_graph(start_dates, end_dates):
         xaxis2_rangeslider_visible=True, 
         xaxis2_rangeslider_thickness=0.1
     )
+
+    # Save storm dates for later use as a global variable
     global storm_dates
     storm_dates = pd.DataFrame(data = {'start_date': pd.to_datetime(start_dates), 'end_date': pd.to_datetime(end_dates)})
 
     return fig
 
+# Run App
 if __name__ == '__main__':
     app.run_server(debug=True)
 
@@ -314,7 +328,7 @@ def RTK(x, P, A):
 #     return df_input
 
 # %%
-# TODO: Fitness Function
+# Fitness Function
 # This function calculates the Kling Gupta Efficiency (KGE) used to assess model performance.
 # Credit goes to Jean-Luc Martel and Richard Arsenault
 def obj_fun_kge(Qobs, Qsim):
@@ -374,17 +388,17 @@ def obj_fun_kge(Qobs, Qsim):
 # - Qsim (numpy array): simulated time series
 # Output:
 # - RMSE
-def obj_fun_rmse(Qobs, Qsim):
-    # Delete all nan values from observed and simulated flows
-    ind_nan = np.isnan(Qobs)
-    Qobs = Qobs[~ind_nan]
-    Qsim = Qsim[~ind_nan]
+# def obj_fun_rmse(Qobs, Qsim):
+#     # Delete all nan values from observed and simulated flows
+#     ind_nan = np.isnan(Qobs)
+#     Qobs = Qobs[~ind_nan]
+#     Qsim = Qsim[~ind_nan]
 
-    RMSE = np.sqrt(
-        np.mean((Qobs - Qsim) ** 2)
-    )
+#     RMSE = np.sqrt(
+#         np.mean((Qobs - Qsim) ** 2)
+#     )
 
-    return RMSE
+#     return RMSE
 
 # Define fitness function to evaulate solution performance during model training
 # This function takes a solution, x, then converts that to a simulated flow series. The simulated flow series is then compared to the actual flow series using the KGE metric.
@@ -397,21 +411,29 @@ def obj_fun_rmse(Qobs, Qsim):
 # Outputs:
 # - (1 - KGE) (float): A metric to evaluate solution performance during training
 
-def fitness_function(x, P, A, Qobs, mask):
-    # Calculate Simulated Flow
-    Qsim = RTK(x, P, A)
+def fitness_function(x, A, df_input, mask):
+    Qsim_arrays = []
+    for _, group_df in df_input.groupby("group"):
+        P = group_df["rainfall_mm"].values
+        Qsim = RTK(x, P, A)
+        Qsim_arrays.append(Qsim)
 
-    Qobs_masked = Qobs[mask]
-    Qsim_masked = Qsim[mask]
+
+    Qsim = np.concatenate(Qsim_arrays)
+    Qobs = df_input["RDII"].values
+
+    # Prevents error message if all R values are < 0.05
+    if sum(Qsim) == 0:
+        return -np.inf
 
     # Compute Kling Gupta Efficiency Metric
     # Range is (-Inf, 1], where 1 is the optimal number
     # Since the GA is set up as a minimization problem where 0 is optimal, we instead return 1 - KGE
-    KGE = obj_fun_kge(Qobs_masked, Qsim_masked)
+    KGE = obj_fun_kge(Qobs, Qsim)
 
     return 1 - KGE
     
-# TODO: Plotting Functions
+# Plotting Functions
 # Plot Synthetic Hydrograph
 # Inputs:
 # - x = [R1, T1, K1, R2, T2, K2, R3, T3, K3] is the RTK parameters
@@ -479,11 +501,12 @@ def plot_synthetic_hydrograph(x):
 
     synthetic_hydrograph = np.sum(padded_hydrographs, axis=0)
 
-    fig, ax = plt.subplots(figsize=(8, 6))
-    ax.plot(np.arange(0, max_length * 5, 5), synthetic_hydrograph, color='black', label="Synthetic RTK Hydrograph")
+    fig, ax = plt.subplots(figsize=(14, 6))
 
     for uh, color, label in zip(hydrographs, colors, labels):
-        ax.plot(np.arange(0, len(uh) * 5, 5), uh, color=color, label=label)
+        ax.fill(np.arange(0, len(uh) * 5, 5), uh, color=color, label=label)
+
+    ax.plot(np.arange(0, max_length * 5, 5), synthetic_hydrograph, color='black', label="Synthetic RTK Hydrograph", lw = 3)
 
     ax.set_xlabel("Time (minutes)")
     ax.set_ylabel("Flow (L/s)/(mm-ha)")
@@ -497,25 +520,25 @@ def plot_synthetic_hydrograph(x):
 # Inputs:
 # - Q: Time-series
 # - prominence (float): 
-def plot_peaks(Q, peak_indices):
-    plt.plot(Q)
-    plt.plot(peak_indices, Q[peak_indices], "x")
-    plt.show()
+# def plot_peaks(Q, peak_indices):
+#     plt.plot(Q)
+#     plt.plot(peak_indices, Q[peak_indices], "x")
+#     plt.show()
 
-def plot_simulated_flow(x, P, A, Q, timestamp):
-    Q_sim = RTK(x, P, A)
+# def plot_simulated_flow(x, P, A, Q, timestamp):
+#     Q_sim = RTK(x, P, A)
 
-    # Plot simulated flow
-    fig, ax = plt.subplots(figsize = (8, 6))
+#     # Plot simulated flow
+#     fig, ax = plt.subplots(figsize = (8, 6))
 
-    ax.plot(timestamp, Q, alpha = 0.7, color = 'b', label = "Actual RDII")
-    ax.plot(timestamp, Q_sim, alpha = 0.7, color = 'r', label = "Simulated RDII")
-    ax.set_xlabel("Time (min)")
-    ax.set_ylabel("Flow (L/s)")
-    ax.set_title("Actual vs. Simulated Flow")
-    ax.legend()
+#     ax.plot(timestamp, Q, alpha = 0.7, color = 'b', label = "Actual RDII")
+#     ax.plot(timestamp, Q_sim, alpha = 0.7, color = 'r', label = "Simulated RDII")
+#     ax.set_xlabel("Time (min)")
+#     ax.set_ylabel("Flow (L/s)")
+#     ax.set_title("Actual vs. Simulated Flow")
+#     ax.legend()
 
-    return None
+#     return None
 
 def plot_simulated_flow_dynamic(x, P, A, Q, timestamp, save_file = False):
     Q_sim = RTK(x, P, A)
@@ -569,16 +592,16 @@ def plot_simulated_flow_dynamic(x, P, A, Q, timestamp, save_file = False):
     fig.show()
     
     if save_file == True:
-        pio.write_html(fig, file="Output_Data/Comparison_Plot.html", auto_open=True)
+        pio.write_html(fig, file="Output_Data/Comparison_Plot.html", auto_open=False)
 
     return None
 
 
 # %%
-# TODO: Define the problem class
+# Define the problem class
 class MyProblem(ElementwiseProblem):
 
-    def __init__(self, P: np.ndarray, A: float, Q: np.ndarray, Ro: float, mask: pd.Series):
+    def __init__(self, A: float, df_input: pd.DataFrame, Ro: float, mask: pd.Series):
         # Define parameter bounds
         R_bounds = (0, 1)
         T_bounds = (0, 24)
@@ -588,9 +611,8 @@ class MyProblem(ElementwiseProblem):
         xl = np.array([R_bounds[0], T_bounds[0], K_bounds[0], R_bounds[0], T_bounds[0], K_bounds[0], R_bounds[0], T_bounds[0], K_bounds[0]])
         xu = np.array([R_bounds[1], T_bounds[1], K_bounds[1], R_bounds[1], T_bounds[1], K_bounds[1], R_bounds[1], T_bounds[1], K_bounds[1]])
 
-        self.P = P
+        self.df_input = df_input
         self.A = A
-        self.Q = Q
         self.Ro = Ro
         self.mask = mask
         
@@ -598,7 +620,7 @@ class MyProblem(ElementwiseProblem):
 
     def _evaluate(self, x, out, *args, **kwargs):
         # Define the model or function to evaluate RMSE
-        fitness_score = fitness_function(x, self.P, self.A, self.Q, self.mask)
+        fitness_score = fitness_function(x, self.A, self.df_input, self.mask)
 
         # Set the objective value
         out["F"] = fitness_score # Evaluation Metric: Kling-Gupta Efficiency (KGE)
@@ -623,29 +645,37 @@ class MyCallback(Callback):
         # Optionally, append the decision variables for the population
         self.data["pop_X"].append(algorithm.pop.get("X").copy())
 
+
+
 # %%
-# TODO: Set Parameters
-A = 107.448671  # ha
-P = np.array(df_rdii['rainfall_mm'])
-Q = np.array(df_rdii['RDII'])
+# Do some preliminary calculations and formatting for gen alg and output stats
+df_input = df_rdii.loc[:, ['timestamp', 'rainfall_mm', 'RDII']] # Set a dataframe with columns timestamp, rainfall_mm, and RDII
+Q = df_input['RDII']
+P = df_input['rainfall_mm']
+
+# Calculate volume of rain
 V_rain = np.nansum(P) * (1/1000) * A * 10000 * 1000 # Litres
+
+# Calculate volume of RDII
 V_RDII = np.nansum(Q) * 300 # Litres
+
+# Calculate runoff ratio
 Ro = V_RDII/V_rain
-timestamp = np.array(df_rdii['timestamp'])
-prominence = 50
-weight = 10
-pop_size = 400
-max_gens = 50
-mask = pd.Series([False] * len(df_rdii))
-for _, row in storm_dates.iterrows():
-    mask |= (df_rdii['timestamp'] >= row['start_date']) & (df_rdii['timestamp'] <= row['end_date'])
+
+# Calculate mask for storms
+df_input_filtered = pd.DataFrame()
+
+for i, row in storm_dates.iterrows():
+    mask = (df_input['timestamp'] >= row['start_date']) & (df_input['timestamp'] <= row['end_date'])
+    df_temp = df_input.loc[mask].copy()
+    df_temp['group'] = i + 1
+    df_input_filtered = pd.concat([df_input_filtered, df_temp], ignore_index = True)
 # %%
-# TODO: Initialize Problem
+# Initialize Problem
 # Create an instance of the problem
 problem = MyProblem(
-    P = P,
     A = A,
-    Q = Q,
+    df_input = df_input_filtered,
     Ro = Ro,
     mask = mask
 )
@@ -676,6 +706,7 @@ res = minimize(problem,
                callback = MyCallback())
 
 # %%
+# Export Results
 Q_sim = RTK(res.X, P, A)
 ind_nan = np.isnan(Q) | np.isnan(Q_sim)  # Mask NaNs in either Q or Q_sim
 Q_tot = np.sum(Q[~ind_nan])
@@ -699,6 +730,6 @@ f.close()
 # TODO: Plot Best Solution
 
 plot_synthetic_hydrograph(res.X)
-plot_simulated_flow_dynamic(res.X, P, A, Q, timestamp, save_file = True)
+plot_simulated_flow_dynamic(res.X, P, A, Q, np.array(df_rdii['timestamp']), save_file = True)
 
 # %%
