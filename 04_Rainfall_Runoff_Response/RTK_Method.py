@@ -30,9 +30,9 @@ from pymoo.termination.default import DefaultSingleObjectiveTermination
 ##############################################################################
 ##############################################################################
 # TODO: Set Parameters
-A = 107.448671  # Set Catchment Area in Hectares
-pop_size = 400  # Set initial population size
-max_gens = 200  # Set the maximum number of generations before termination
+A = 47.526207  # Set Catchment Area in Hectares
+pop_size = 500  # Set initial population size
+max_gens = 100  # Set the maximum number of generations before termination
 ##############################################################################
 ##############################################################################
 ##############################################################################
@@ -238,7 +238,7 @@ def transform_rainfall_with_UH(P, A, UH):
 # - x = [R1, T1, K1, R2, T2, K2, R3, T3, K3] is the RTK parameters
 # - P (mm): Precipitation time series in millimeters at 5-minute time intervals
 # - A (ha): Catchment area in hectares 
-def RTK(x, P, A):
+def RTK(x, P, A, R_threshold = 0.05):
     # Fill all nan values in precip time series with 0
     # This assumes there are no major gaps in precip time series
     P_filled = np.where(np.isnan(P), 0.0, P)
@@ -246,17 +246,17 @@ def RTK(x, P, A):
 
     R1, T1, K1, R2, T2, K2, R3, T3, K3 = x
 
-    if R1 >= 0.05:
+    if R1 >= R_threshold:
         UH1 = unit_hydrograph(R1, T1, K1)
         Q1 = transform_rainfall_with_UH(P_filled, A, UH1)
         simulated_flow += Q1
 
-    if R2 >= 0.05:
+    if R2 >= R_threshold:
         UH2 = unit_hydrograph(R2, T2, K2)
         Q2 = transform_rainfall_with_UH(P_filled, A, UH2)
         simulated_flow += Q2
 
-    if R3 >= 0.05:
+    if R3 >= R_threshold:
         UH3 = unit_hydrograph(R3, T3, K3)
         Q3 = transform_rainfall_with_UH(P_filled, A, UH3)
         simulated_flow += Q3
@@ -388,17 +388,17 @@ def obj_fun_kge(Qobs, Qsim):
 # - Qsim (numpy array): simulated time series
 # Output:
 # - RMSE
-# def obj_fun_rmse(Qobs, Qsim):
-#     # Delete all nan values from observed and simulated flows
-#     ind_nan = np.isnan(Qobs)
-#     Qobs = Qobs[~ind_nan]
-#     Qsim = Qsim[~ind_nan]
+def obj_fun_rmse(Qobs, Qsim):
+    # Delete all nan values from observed and simulated flows
+    ind_nan = np.isnan(Qobs)
+    Qobs = Qobs[~ind_nan]
+    Qsim = Qsim[~ind_nan]
 
-#     RMSE = np.sqrt(
-#         np.mean((Qobs - Qsim) ** 2)
-#     )
+    RMSE = np.sqrt(
+        np.mean((Qobs - Qsim) ** 2)
+    )
 
-#     return RMSE
+    return RMSE
 
 # Define fitness function to evaulate solution performance during model training
 # This function takes a solution, x, then converts that to a simulated flow series. The simulated flow series is then compared to the actual flow series using the KGE metric.
@@ -415,7 +415,7 @@ def fitness_function(x, A, df_input, mask):
     Qsim_arrays = []
     for _, group_df in df_input.groupby("group"):
         P = group_df["rainfall_mm"].values
-        Qsim = RTK(x, P, A)
+        Qsim = RTK(x, P, A, R_threshold = 0.001)
         Qsim_arrays.append(Qsim)
 
 
@@ -423,8 +423,8 @@ def fitness_function(x, A, df_input, mask):
     Qobs = df_input["RDII"].values
 
     # Prevents error message if all R values are < 0.05
-    if sum(Qsim) == 0:
-        return -np.inf
+    # if sum(Qsim) == 0:
+    #     return -np.inf
 
     # Compute Kling Gupta Efficiency Metric
     # Range is (-Inf, 1], where 1 is the optimal number
@@ -467,26 +467,26 @@ def fitness_function(x, A, df_input, mask):
 
 #     return None
 
-def plot_synthetic_hydrograph(x):
+def plot_synthetic_hydrograph(x, R_threshold = 0.001):
     R1, T1, K1, R2, T2, K2, R3, T3, K3 = x
 
     hydrographs = []
     colors = []
     labels = []
 
-    if R1 >= 0.05:
+    if R1 >= R_threshold:
         UH1 = unit_hydrograph(R1, T1, K1)
         hydrographs.append(UH1)
         colors.append('r')
         labels.append('UH1')
 
-    if R2 >= 0.05:
+    if R2 >= R_threshold:
         UH2 = unit_hydrograph(R2, T2, K2)
         hydrographs.append(UH2)
         colors.append('g')
         labels.append('UH2')
 
-    if R3 >= 0.05:
+    if R3 >= R_threshold:
         UH3 = unit_hydrograph(R3, T3, K3)
         hydrographs.append(UH3)
         colors.append('b')
@@ -541,7 +541,7 @@ def plot_synthetic_hydrograph(x):
 #     return None
 
 def plot_simulated_flow_dynamic(x, P, A, Q, timestamp, save_file = False):
-    Q_sim = RTK(x, P, A)
+    Q_sim = RTK(x, P, A, R_threshold = 0.001)
 
     # Create the figure
     #fig = go.Figure()
@@ -707,7 +707,7 @@ res = minimize(problem,
 
 # %%
 # Export Results
-Q_sim = RTK(res.X, P, A)
+Q_sim = RTK(res.X, P, A, R_threshold = 0.001)
 ind_nan = np.isnan(Q) | np.isnan(Q_sim)  # Mask NaNs in either Q or Q_sim
 Q_tot = np.sum(Q[~ind_nan])
 Q_sim_tot = np.sum(Q_sim[~ind_nan])
