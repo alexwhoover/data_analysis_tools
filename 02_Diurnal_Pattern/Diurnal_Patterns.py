@@ -4,7 +4,6 @@ import numpy as np
 from datetime import datetime, timedelta
 import holidays
 import matplotlib.pyplot as plt
-import seaborn as sns
 import plotly.graph_objects as go
 from dash import Dash, dcc, html, Input, Output, State, callback
 
