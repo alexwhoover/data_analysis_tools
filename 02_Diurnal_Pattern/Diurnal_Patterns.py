@@ -10,7 +10,7 @@ from dash import Dash, dcc, html, Input, Output, State, callback
 
 # %%
 # Options ####
-separate_fridays = False # Option to make Friday its own group in the diurnal calculations
+separate_fridays = True # Option to make Friday its own group in the diurnal calculations
 # %%
 # Function to calculate base flow from a diurnal pattern
 

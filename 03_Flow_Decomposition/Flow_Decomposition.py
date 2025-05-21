@@ -10,7 +10,7 @@ from plotly.subplots import make_subplots
 
 # %%
 # Options
-separate_fridays = False
+separate_fridays = True
 # %%
 # Import data from pre-processing step and DWF pattern
 fp1 = 'Input_Data/flow_precip_data.csv'

@@ -7,7 +7,7 @@ import os
 # %%
 # Filepath Declarations and import
 precip_fp = "Input_Data/TROUT.csv"
-flow_fp = "Input_Data/CCR_COM002.csv"
+flow_fp = "Input_Data/STC_SAN024.csv"
 
 df_precip_raw = (pd.read_csv(precip_fp, skiprows = 2)
                 .rename(columns = {
