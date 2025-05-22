@@ -1,14 +1,18 @@
 # %%
+# Import Libraries
 
 import pandas as pd
 import numpy as np
 import os
 
 # %%
-# Filepath Declarations and import
+# Filepath Declarations and Data Import
 precip_fp = "Input_Data/TROUT.csv"
 flow_fp = "Input_Data/STC_SAN024.csv"
 
+# Flowworks CSV Format Specific Data Import
+# Precip CSV must have columns yyyy/MM/dd hh:mm:ss, FINAL Rainfall (mm), and QAQC Data Flags
+# Adjust code if using different CSV format
 df_precip_raw = (pd.read_csv(precip_fp, skiprows = 2)
                 .rename(columns = {
                     'yyyy/MM/dd hh:mm:ss': 'timestamp',
@@ -17,6 +21,8 @@ df_precip_raw = (pd.read_csv(precip_fp, skiprows = 2)
                 })
                 .assign(timestamp = lambda df: pd.to_datetime(df['timestamp'], format = '%Y/%m/%d %H:%M:%S'))
 )
+# Flow CSV must have columns yyyy/MM/dd hh:mm:ss, Final Depth (mm), Final Flow (l/s), Final Velocity (m/s)
+# Adjust code if using different CSV format
 df_flow_raw = (pd.read_csv(flow_fp, skiprows=2)
             .rename(columns={
                 'yyyy/MM/dd hh:mm:ss': 'timestamp',
@@ -28,14 +34,14 @@ df_flow_raw = (pd.read_csv(flow_fp, skiprows=2)
 )
 
 # %%
-# For simplicity, we will drop all rainfall rows that include a flag != 0, then drop the flag column
+# Use only data with no flags for subsequent analysis
 df_precip_filtered = (df_precip_raw.query('flag == 0') # Filter rows where flag is 0
                 .drop(columns = ['flag']) # Drop flag column
 )
 # %%
 # Create a new dataframe with no missing timestamps
 # Join both flow and precip to this new dataframe
-# This ensures there are no missing timestamps in data
+# This ensures there are no missing timestamps in dataframe
 
 # Get min and max timestamps
 min_time = df_flow_raw['timestamp'].min()
