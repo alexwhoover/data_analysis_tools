@@ -2,9 +2,7 @@
 
 import pandas as pd
 import numpy as np
-import os
 from datetime import datetime, timedelta
-import matplotlib.pyplot as plt
 import plotly.graph_objects as go
 import plotly.io as pio
 
@@ -17,9 +15,47 @@ df_input = (pd.read_csv(fp)
 # %%
 # Define Parameters
 
+# rolling_window_hr: Defines the rolling sum window size (storm duration) in hours to calculate the rainfall intensity.
+# Closely related to min_intensity_mm_hr, as a larger storm duration will lead to lower rainfall intensities.
+rolling_window_hr = 6 # hrs
+
+# min_intensity_mm_hr: Defines the minimum rainfall intensity threshold in mm/hr which defines a rainfall event.
+min_intensity_mm_hr = 0.1 # mm/hr
+
+# inter_event_duration_hr: Defines time in hours between storm events in which storm events should be considered as one.
+# This parameter is assessed before lead_time_hr and response_time_hr are applied to the storm event start and end times.
+inter_event_duration_hr = 24 # hrs
+
+# min_event_duration_hr: Defines minimum storm event duration.
+# This parameter is assessed before lead_time_hr and response_time_hr are applied to the storm event start and end times.
+min_event_duration_hr = 1 # hrs
+
+# response_time_hr: Defines time in hours added to the end of a storm event to account for runoff response being delayed.
+# This parameter should be large enough to capture the time between the last drop of rainfall in a storm and the last drop of flow in sewer as a result of storm event.
+response_time_hr = 72 # hrs
+
+# lead_time_hr: Defines time in hours subtracted from the start of a storm event.
+lead_time_hr = 2
 # %%
 # Define Functions
-def calculate_flow_events(df_input, min_intensity_mm_hr = 0.1, rolling_window_hr = 6, response_time_hr = 24, inter_event_duration_hr = 24, min_event_duration_hr = 1, lead_time_hr = 2):
+"""
+Function to calculate flow events based on rainfall
+
+Inputs:
+- df_input (pd.DataFrame): input dataframe with columns 'timestamp', 'rainfall_mm', 'flow_lps'
+- rolling_window_hr (float): Defines the rolling sum window size (storm duration) in hours to calculate the rainfall intensity.
+- min_intensity_mm_hr (float): Defines the minimum rainfall intensity threshold in mm/hr which defines a rainfall event.
+- inter_event_duration_hr (float): Defines time in hours between storm events in which storm events should be considered as one.
+- min_event_duration_hr (float): Defines minimum storm event duration.
+- response_time_hr (float): Defines time in hours added to the end of a storm event to account for runoff response being delayed.
+- lead_time_hr (float): Defines time in hours subtracted from the start of a storm event.
+
+Output:
+- df_input (pd.DataFrame) with additional columns rainfall_roll_sum, rainfall_roll_sum_intensity, wet_weather_event, missing_data
+- wet_weather_event is either 0 or 1 and defines if the current timestamp is within a storm event
+"""
+
+def calculate_flow_events(df_input, rolling_window_hr = 6, min_intensity_mm_hr = 0.1, inter_event_duration_hr = 24, min_event_duration_hr = 1, response_time_hr = 24, lead_time_hr = 2):
     window_size = int(rolling_window_hr * 60 / 5)
 
     # Calculate rolling sum of precip, then convert to intensity
@@ -70,7 +106,7 @@ def calculate_flow_events(df_input, min_intensity_mm_hr = 0.1, rolling_window_hr
         
 # %%
 # Categorize flow as dry or wet
-df_events = calculate_flow_events(df_input, min_intensity_mm_hr = 0.1, rolling_window_hr = 6, response_time_hr = 72, inter_event_duration_hr = 24, min_event_duration_hr = 1, lead_time_hr = 2)
+df_events = calculate_flow_events(df_input, min_intensity_mm_hr = min_intensity_mm_hr, rolling_window_hr = rolling_window_hr, response_time_hr = response_time_hr, inter_event_duration_hr = inter_event_duration_hr, min_event_duration_hr = min_event_duration_hr, lead_time_hr = lead_time_hr)
 
 # %%
 # Create figure
@@ -142,6 +178,6 @@ fig.update_layout(
 fig.show()
 # %%
 # Save data to csv
-df_events.to_csv("Output_Data/Flow_Categorization.csv", index = False)
-pio.write_html(fig, "Output_Data/Flow_Categorization_Plot.html")
+df_events.to_csv("Output_Data/flow_categorization.csv", index = False)
+pio.write_html(fig, "Output_Data/flow_categorization_plot.html")
 # %%
