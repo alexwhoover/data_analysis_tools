@@ -32,16 +32,12 @@ raw_rainfall = client.dl_channel(
 
 # %%
 ###################################
-# CREATE FLOWSITE OBJECT  #########
+# ANALYSIS  #######################
 ###################################
 
 # Create a FlowSite object
-flow_site = FlowSite(site_name, raw_flow, raw_rainfall, separate_fridays = True)
+flow_site = FlowSite(site_name, raw_flow, raw_rainfall, separate_fridays = False)
 
-# %%
-###################################
-# ANALYSIS  #######################
-###################################
 # Categorize Flow
 flow_site.categorize_flow(            
     rolling_window_hr = 6,
@@ -51,10 +47,6 @@ flow_site.categorize_flow(
     response_time_hr = 72,
     lead_time_hr = 2
 )
-
-#flow_site.plot_categorization()
-
 # %%
 flow_site.calculate_diurnal()
-flow_site.plot_diurnal()
 # %%

@@ -4,7 +4,7 @@ import plotly.graph_objects as go
 import matplotlib.pyplot as plt
 import holidays
 
-def categorize_flow(df_input, rolling_window_hr, min_intensity_mm_hr, inter_event_duration_hr, min_event_duration_hr, response_time_hr, lead_time_hr):
+def categorize_flow(df_input, separate_fridays, rolling_window_hr, min_intensity_mm_hr, inter_event_duration_hr, min_event_duration_hr, response_time_hr, lead_time_hr):
     """
     Function to calculate flow events based on rainfall
 
@@ -38,10 +38,6 @@ def categorize_flow(df_input, rolling_window_hr, min_intensity_mm_hr, inter_even
         df_input['rainfall_roll_sum_intensity'] >= min_intensity_mm_hr
     ].tolist()
 
-    # If there are no rainfall events, return df_input
-    if not event_indices:
-        return df_input
-    
     # Combine events within the inter-event duration using timestamps
     current_event_start = df_input.loc[event_indices[0], 'timestamp']
     current_event_end = df_input.loc[event_indices[0], 'timestamp']
@@ -67,8 +63,44 @@ def categorize_flow(df_input, rolling_window_hr, min_intensity_mm_hr, inter_even
     # Add a column showing periods with NA values in flow or precip
     df_input['missing_data'] = (~((~df_input['rainfall_mm'].isnull()) & (~df_input['flow_lps'].isnull()))).astype(int)
     
-    return df_input
+    # Plot categorization at this point before further filtering as a QA/QC check
+    plot_categorization(df_input)
 
+    # Filter dataframe to only include fully dry days
+    df_dwf = _filter_dwf(df_input)
+    
+    # Categorize days into groups, either [Workday, Weekend/Holiday] or [Workday, Friday, Weekend/Holiday]
+    df_dwf = _categorize_days(df_dwf, separate_fridays)
+
+    # Get rid of intermediate calculation columns
+    df_dwf = df_dwf[["timestamp", "date", "time_of_day", "group", "flow_lps"]]
+    
+    return df_dwf
+
+def _filter_dwf(df):
+    df = df.copy()
+
+    df['date'] = df['timestamp'].dt.date
+    df['time_of_day'] = df['timestamp'].dt.strftime('%H:%M')
+    df['weekday'] = df['timestamp'].dt.strftime('%A')
+
+    # Initial manual "guess" from categorize_flow()
+    # Identify fully dry days: no wet weather, no missing data, and exactly 288 timesteps (5-min intervals in 24 hrs)
+    full_dry_days = (
+        df.groupby('date')
+        .filter(lambda day: 
+            day['wet_weather_event'].eq(0).all() and
+            day['missing_data'].eq(0).all() and
+            len(day) == 288
+        )['date']
+        .unique()
+        .tolist()
+    )
+
+    # Filter input dataframe to only include fully dry days
+    df = df[df['timestamp'].dt.date.isin(full_dry_days)].copy()
+
+    return df
 
 def plot_categorization(df_input):
     # Create figure
@@ -139,21 +171,20 @@ def plot_categorization(df_input):
     # Show the plot
     fig.show()
 
+def _calc_base_flow(MDF: float, ADF: float):
+    """
+    Purpose: Calculate base flow from a diurnal pattern using the Stevens - Schutzback Method
+    Inputs:
+        MDF (float): Minimum Daily Flow Rate (L/s) (I am calling this MNF)
+        ADF (float): Average Daily Flow Rate (L/s) (I am calling this ADWF)
 
-"""
-Purpose: Calculate base flow from a diurnal pattern using the Stevens - Schutzback Method
-Inputs:
-    MDF (float): Minimum Daily Flow Rate (L/s) (I am calling this MNF)
-    ADF (float): Average Daily Flow Rate (L/s) (I am calling this ADWF)
+    Returns:
+        BI (float): Base Infiltration (L/s) (I am calling this GWI)
 
-Returns:
-    BI (float): Base Infiltration (L/s) (I am calling this GWI)
+    Source: 
+        Mitchell, Paul & Stevens, Patrick & Nazaroff, Adam. (2007). QUANTIFYING BASE INFILTRATION IN SEWERS: A Comparison of Methods and a Simple Empirical Solution. Proceedings of the Water Environment Federation. 2007. 219-238. 10.2175/193864707787974805. 
 
-Source: 
-    Mitchell, Paul & Stevens, Patrick & Nazaroff, Adam. (2007). QUANTIFYING BASE INFILTRATION IN SEWERS: A Comparison of Methods and a Simple Empirical Solution. Proceedings of the Water Environment Federation. 2007. 219-238. 10.2175/193864707787974805. 
-
-"""
-def calc_base_flow(MDF: float, ADF: float):
+    """
     conversion_factor = 0.022824465227271 # 0.023mgd = 1L/s
 
     # Convert lps to mgd
@@ -168,30 +199,8 @@ def calc_base_flow(MDF: float, ADF: float):
 
     return BI
 
-def calculate_diurnal(df_input: pd.DataFrame, separate_fridays: bool):
-    # calculate_diurnal takes a a dataframe of flow categorized into dry and wet periods as input,
-    # further verifies / exclused certain dry days based on statistical methods, then calculates the diurnal pattern.
-    
-    df_input = df_input.copy()
-    df_input['date'] = df_input['timestamp'].dt.date
-    df_input['time_of_day'] = df_input['timestamp'].dt.strftime('%H:%M')
-    df_input['weekday'] = df_input['timestamp'].dt.strftime('%A')
-
-    # Initial manual "guess" from categorize_flow()
-    # Identify fully dry days: no wet weather, no missing data, and exactly 288 timesteps (5-min intervals in 24 hrs)
-    full_dry_days = (
-        df_input.groupby('date')
-        .filter(lambda day: 
-            day['wet_weather_event'].eq(0).all() and
-            day['missing_data'].eq(0).all() and
-            len(day) == 288
-        )['date']
-        .unique()
-        .tolist()
-    )
-
-    # Filter input dataframe to only include fully dry days
-    df_dwf = df_input[df_input['timestamp'].dt.date.isin(full_dry_days)].copy()
+def _categorize_days(df_dwf, separate_fridays):
+    df_dwf = df_dwf.copy()
 
     # Get BC holidays for the relevant years
     years = df_dwf["timestamp"].dt.year.unique()
@@ -210,17 +219,20 @@ def calculate_diurnal(df_input: pd.DataFrame, separate_fridays: bool):
             lambda x: "Weekend/Holiday" 
             if (x in bc_holidays or x.weekday() >= 5) 
             else "Workday")
+    
+    return df_dwf
 
+def calculate_diurnal(df_dwf: pd.DataFrame):
     # Calculate median value for each timestep in day
     # Median chosen as less susceptible to outliers
     df_diurnal = df_dwf.groupby(["group", "time_of_day"], as_index = False)["flow_lps"].median()
     df_diurnal.rename(columns = {"flow_lps": "DWF"}, inplace = True)
     df_diurnal["MNF"] = df_diurnal.groupby("group")["DWF"].transform("min") # Minimum Nighttime Flow (MNF)
     df_diurnal["ADWF"] = df_diurnal.groupby("group")["DWF"].transform("mean") # Average Dry Weather Flow (ADWF)
-    df_diurnal["GWI"] = df_diurnal.apply(lambda row: calc_base_flow(row["MNF"], row["ADWF"]), axis = 1) # Ground Water Infiltration
+    df_diurnal["GWI"] = df_diurnal.apply(lambda row: _calc_base_flow(row["MNF"], row["ADWF"]), axis = 1) # Ground Water Infiltration
     df_diurnal["SF"] = df_diurnal["DWF"] - df_diurnal["GWI"]
 
-    return df_diurnal, df_dwf
+    return df_diurnal
 
 def plot_diurnal(df_diurnal, df_dwf):
     # Get unique groups

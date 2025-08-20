@@ -20,8 +20,9 @@ class FlowSite:
             lead_time_hr = 2
     ):
         df_input = self.raw_data.data.copy()
-        self.results.categorization_results = categorize_flow(
-            df_input, 
+        self.results.dwf_results = categorize_flow(
+            df_input,
+            self.separate_fridays, 
             rolling_window_hr = rolling_window_hr, 
             min_intensity_mm_hr = min_intensity_mm_hr, 
             inter_event_duration_hr = inter_event_duration_hr,
@@ -30,16 +31,17 @@ class FlowSite:
             lead_time_hr = lead_time_hr
         )
 
-    def plot_categorization(self):
-        if self.results.categorization_results is None:
-            raise RuntimeError("You must run categorize_flow() before plotting categorization.")
-        plot_categorization(self.results.categorization_results)
+    # def plot_categorization(self):
+    #     if self.results.categorization_results is None:
+    #         raise RuntimeError("You must run categorize_flow() before plotting categorization.")
+    #     plot_categorization(self.results.categorization_results)
 
     def calculate_diurnal(self):
-        df_input = self.results.categorization_results.copy()
-        self.results.diurnal_pattern, self.results.dwf_results = calculate_diurnal(df_input, self.separate_fridays)
+        df_input = self.results.dwf_results.copy()
+        self.results.diurnal_pattern = calculate_diurnal(df_input)
+        self._plot_diurnal()
 
-    def plot_diurnal(self):
+    def _plot_diurnal(self):
         if self.results.diurnal_pattern is None or self.results.dwf_results is None:
             raise RuntimeError("You must run calculate_diurnal() before plotting diurnal pattern")
         plot_diurnal(self.results.diurnal_pattern, self.results.dwf_results)
