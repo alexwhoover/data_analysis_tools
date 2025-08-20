@@ -45,8 +45,11 @@ flow_site.categorize_flow(
     inter_event_duration_hr = 24,
     min_event_duration_hr = 1,
     response_time_hr = 72,
-    lead_time_hr = 2
+    lead_time_hr = 2,
+    plot = False
 )
-# %%
-flow_site.calculate_diurnal()
-# %%
+
+flow_site.calculate_diurnal(plot = False)
+flow_site.decompose_flow(plot = True)
+
+

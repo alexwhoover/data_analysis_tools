@@ -1,10 +1,12 @@
 import pandas as pd
+import numpy as np
 from datetime import timedelta
 import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 import matplotlib.pyplot as plt
 import holidays
 
-def categorize_flow(df_input, separate_fridays, rolling_window_hr, min_intensity_mm_hr, inter_event_duration_hr, min_event_duration_hr, response_time_hr, lead_time_hr):
+def categorize_flow(df_input, separate_fridays, rolling_window_hr, min_intensity_mm_hr, inter_event_duration_hr, min_event_duration_hr, response_time_hr, lead_time_hr, plot):
     """
     Function to calculate flow events based on rainfall
 
@@ -64,7 +66,8 @@ def categorize_flow(df_input, separate_fridays, rolling_window_hr, min_intensity
     df_input['missing_data'] = (~((~df_input['rainfall_mm'].isnull()) & (~df_input['flow_lps'].isnull()))).astype(int)
     
     # Plot categorization at this point before further filtering as a QA/QC check
-    plot_categorization(df_input)
+    if plot == True:
+        plot_categorization(df_input)
 
     # Filter dataframe to only include fully dry days
     df_dwf = _filter_dwf(df_input)
@@ -80,9 +83,11 @@ def categorize_flow(df_input, separate_fridays, rolling_window_hr, min_intensity
 def _filter_dwf(df):
     df = df.copy()
 
-    df['date'] = df['timestamp'].dt.date
-    df['time_of_day'] = df['timestamp'].dt.strftime('%H:%M')
-    df['weekday'] = df['timestamp'].dt.strftime('%A')
+    _add_time_columns(df)
+
+    # df['date'] = df['timestamp'].dt.date
+    # df['time_of_day'] = df['timestamp'].dt.strftime('%H:%M')
+    # df['weekday'] = df['timestamp'].dt.strftime('%A')
 
     # Initial manual "guess" from categorize_flow()
     # Identify fully dry days: no wet weather, no missing data, and exactly 288 timesteps (5-min intervals in 24 hrs)
@@ -101,6 +106,11 @@ def _filter_dwf(df):
     df = df[df['timestamp'].dt.date.isin(full_dry_days)].copy()
 
     return df
+
+def _add_time_columns(df):
+    df['date'] = df['timestamp'].dt.date
+    df['time_of_day'] = df['timestamp'].dt.strftime('%H:%M')
+    df['weekday'] = df['timestamp'].dt.strftime('%A')
 
 def plot_categorization(df_input):
     # Create figure
@@ -199,28 +209,39 @@ def _calc_base_flow(MDF: float, ADF: float):
 
     return BI
 
-def _categorize_days(df_dwf, separate_fridays):
-    df_dwf = df_dwf.copy()
+def _categorize_days(df, separate_fridays):
+    """
+    Given a dataframe, df, with columns "timestamp"
+    return a same dataframe with new column "group" which
+    groups days of the week into Workday, Weekend/Holiday, and (optional) Friday.
+    
+    Also creates columns "date" and "time_of_day" from "timestamp" if they do not already exist.
+    """
+    df = df.copy()
+
+    # df['date'] = df['timestamp'].dt.date
+    # df['time_of_day'] = df['timestamp'].dt.strftime('%H:%M')
+    _add_time_columns(df)
 
     # Get BC holidays for the relevant years
-    years = df_dwf["timestamp"].dt.year.unique()
+    years = df["timestamp"].dt.year.unique()
     bc_holidays = set(holidays.CA(subdiv = "BC", years = years).keys())
 
     # Handle separate Friday logic if true
     if separate_fridays == True:
-        df_dwf.loc[:, "group"] = df_dwf["date"].apply(
+        df.loc[:, "group"] = df["date"].apply(
             lambda x: "Weekend/Holiday" 
             if (x in bc_holidays or x.weekday() >= 5) 
             else "Friday" if x.weekday() == 4  
             else "Workday"
         )
     else:
-        df_dwf.loc[:, "group"] = df_dwf["date"].apply(
+        df.loc[:, "group"] = df["date"].apply(
             lambda x: "Weekend/Holiday" 
             if (x in bc_holidays or x.weekday() >= 5) 
             else "Workday")
     
-    return df_dwf
+    return df
 
 def calculate_diurnal(df_dwf: pd.DataFrame):
     # Calculate median value for each timestep in day
@@ -272,3 +293,82 @@ def plot_diurnal(df_diurnal, df_dwf):
 
     plt.tight_layout()
     plt.show()
+
+def decompose_flow(df_flow, df_diurnal, separate_fridays):
+    df_flow_grouped = _categorize_days(df_flow, separate_fridays)
+
+    df_comb = pd.merge(
+        left = df_flow_grouped,
+        right = df_diurnal,
+        how = 'left',
+        left_on = ['time_of_day', 'group'],
+        right_on = ['time_of_day', 'group'],
+    )
+
+    # Calculate RDII as Raw Flow - Dry Weather Flow. Floor is 0 L/s.
+    df_comb['RDII'] = np.where(df_comb['flow_lps'] - df_comb['DWF'] > 0, df_comb['flow_lps'] - df_comb['DWF'], 0)
+
+    # Drop intermediate calculation columns
+    df_comb = df_comb.drop(columns=["time_of_day", "weekday", "group", "date"], errors="ignore")
+
+    return df_comb
+
+def plot_decomposition(df_rdii):
+    # Create figure with two rows
+    fig = make_subplots(rows=2, cols=1, shared_xaxes=True, row_heights=[1, 4])
+
+    # Max values for axis scaling
+    flow_max = df_rdii["flow_lps"].max()
+    rainfall_max = df_rdii["rainfall_mm"].max()
+
+    # Rainfall plot
+    fig.add_trace(go.Scatter(
+        x=df_rdii["timestamp"],
+        y=df_rdii["rainfall_mm"],
+        mode="lines",
+        name="Rainfall (mm)",
+        line=dict(color="darkblue", width=1),
+        fill="tozeroy",
+        opacity=0.2
+    ), row=1, col=1)
+
+    # Flow plot (stacked)
+    fig.add_trace(go.Scatter(
+        x=df_rdii["timestamp"],
+        y=df_rdii["GWI"],
+        mode="lines",
+        name="GWI (L/s)",
+        line=dict(color="red", width=1),
+        fill="tozeroy"
+    ), row=2, col=1)
+
+    fig.add_trace(go.Scatter(
+        x=df_rdii["timestamp"],
+        y=df_rdii["DWF"],
+        mode="lines",
+        name="SF (L/s)",
+        line=dict(color="orange", width=1),
+        fill="tozeroy"
+    ), row=2, col=1)
+
+    fig.add_trace(go.Scatter(
+        x=df_rdii["timestamp"],
+        y=df_rdii["flow_lps"],
+        mode="lines",
+        name="RDII (L/s)",
+        line=dict(color="green", width=1),
+        fill="tonexty"
+    ), row=2, col=1)
+
+    # Formatting
+    fig.update_layout(
+        title="Stacked (Additive) Flow with Rainfall",
+        xaxis2=dict(title="Timestamp", tickangle=45),
+        yaxis=dict(title="Rainfall (mm)", range=[0, rainfall_max * 1.1]),
+        yaxis2=dict(title="Flow (L/s)", range=[0, flow_max * 1.1]),
+        legend=dict(title="Legend"),
+        template="plotly_white"
+    )
+
+    # Show the plot
+    fig.show()

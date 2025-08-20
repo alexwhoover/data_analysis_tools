@@ -1,7 +1,7 @@
 import pandas as pd
 from sewer_analysis.core.raw_data import RawData
 from sewer_analysis.core.results_data import ResultsData
-from sewer_analysis.analysis.utils import categorize_flow, plot_categorization, calculate_diurnal, plot_diurnal
+from sewer_analysis.analysis.utils import categorize_flow, calculate_diurnal, decompose_flow, plot_diurnal, plot_decomposition
 
 class FlowSite:
     def __init__(self, name: str, raw_flow: pd.DataFrame, raw_rainfall: pd.DataFrame, separate_fridays: bool = False):
@@ -17,42 +17,48 @@ class FlowSite:
             inter_event_duration_hr = 24,
             min_event_duration_hr = 1,
             response_time_hr = 72,
-            lead_time_hr = 2
+            lead_time_hr = 2,
+            plot = True
     ):
         df_input = self.raw_data.data.copy()
         self.results.dwf_results = categorize_flow(
             df_input,
             self.separate_fridays, 
-            rolling_window_hr = rolling_window_hr, 
-            min_intensity_mm_hr = min_intensity_mm_hr, 
-            inter_event_duration_hr = inter_event_duration_hr,
-            min_event_duration_hr = min_event_duration_hr,
-            response_time_hr = response_time_hr,
-            lead_time_hr = lead_time_hr
+            rolling_window_hr, 
+            min_intensity_mm_hr, 
+            inter_event_duration_hr,
+            min_event_duration_hr,
+            response_time_hr,
+            lead_time_hr,
+            plot = plot
         )
 
-    # def plot_categorization(self):
-    #     if self.results.categorization_results is None:
-    #         raise RuntimeError("You must run categorize_flow() before plotting categorization.")
-    #     plot_categorization(self.results.categorization_results)
-
-    def calculate_diurnal(self):
+    def calculate_diurnal(self, plot = True):
         df_input = self.results.dwf_results.copy()
         self.results.diurnal_pattern = calculate_diurnal(df_input)
-        self._plot_diurnal()
+
+        if plot == True:
+            self._plot_diurnal()
 
     def _plot_diurnal(self):
         if self.results.diurnal_pattern is None or self.results.dwf_results is None:
             raise RuntimeError("You must run calculate_diurnal() before plotting diurnal pattern")
         plot_diurnal(self.results.diurnal_pattern, self.results.dwf_results)
 
-    def decompose_flow(self):
+    def decompose_flow(self, plot = True):
         if self.results.diurnal_pattern is None:
             raise RuntimeError("You must run calculate_diurnal() before calculating RDII")
-        pass
+        
+        df_flow = self.raw_data.data.copy()
+        df_diurnal = self.results.diurnal_pattern.copy()
 
-    def plot_decomposition(self):
-        pass
+        self.results.rdii_results = decompose_flow(df_flow, df_diurnal, self.separate_fridays)
+
+        if plot == True:
+            self._plot_decomposition()
+
+    def _plot_decomposition(self):
+        plot_decomposition(self.results.rdii_results)
 
     def RTK_method(self):
         pass
