@@ -169,64 +169,60 @@ def calc_base_flow(MDF: float, ADF: float):
     return BI
 
 def calculate_diurnal(df_input: pd.DataFrame, separate_fridays: bool):
-    # Create columns for date, time of day, and weekday based on the timestamp column
-    # These columns are used for later processing of diurnal pattern
+    # calculate_diurnal takes a a dataframe of flow categorized into dry and wet periods as input,
+    # further verifies / exclused certain dry days based on statistical methods, then calculates the diurnal pattern.
+    
+    df_input = df_input.copy()
     df_input['date'] = df_input['timestamp'].dt.date
     df_input['time_of_day'] = df_input['timestamp'].dt.strftime('%H:%M')
     df_input['weekday'] = df_input['timestamp'].dt.strftime('%A')
 
-    # Identify fully dry days
-    # A day is considered dry if all 288 5-minute timesteps in a day were previously classified as dry and there is no missing data.
-    full_dry_days_series = df_input.groupby(df_input['date']).apply(
-        lambda day: (
-            day['wet_weather_event'].eq(0).all() and 
+    # Initial manual "guess" from categorize_flow()
+    # Identify fully dry days: no wet weather, no missing data, and exactly 288 timesteps (5-min intervals in 24 hrs)
+    full_dry_days = (
+        df_input.groupby('date')
+        .filter(lambda day: 
+            day['wet_weather_event'].eq(0).all() and
             day['missing_data'].eq(0).all() and
-            len(day) == 288 # Ensure exactly 288 timesteps in the day (# of 5-min time intervals in 24hrs)
-            ),
-            include_groups = False
-    ).rename('fully_dry') # Returns pd.Series indexed by date
-
-    full_dry_days = full_dry_days_series[full_dry_days_series].index.tolist()
+            len(day) == 288
+        )['date']
+        .unique()
+        .tolist()
+    )
 
     # Filter input dataframe to only include fully dry days
-    # This dataframe will form the basis of diurnal pattern calculation
-    df_dwf = df_input[df_input['timestamp'].dt.date.isin(full_dry_days)]
-
-    # Calculate DWF Diurnal Pattern based on selected dry days from previous step
-
-    # Filter flow data based on selected days
-    # TODO Add in date exclusion
-    #df_dwf_filtered = df_dwf[df_dwf["date"].isin(pd.to_datetime(selected_days).dt.date)].copy()
-    df_dwf_filtered = df_dwf.copy()
+    df_dwf = df_input[df_input['timestamp'].dt.date.isin(full_dry_days)].copy()
 
     # Get BC holidays for the relevant years
-    years = df_dwf_filtered["timestamp"].dt.year.unique()
+    years = df_dwf["timestamp"].dt.year.unique()
     bc_holidays = set(holidays.CA(subdiv = "BC", years = years).keys())
 
+    # Handle separate Friday logic if true
     if separate_fridays == True:
-        df_dwf_filtered.loc[:, "group"] = df_dwf_filtered["date"].apply(
+        df_dwf.loc[:, "group"] = df_dwf["date"].apply(
             lambda x: "Weekend/Holiday" 
             if (x in bc_holidays or x.weekday() >= 5) 
             else "Friday" if x.weekday() == 4  
             else "Workday"
         )
     else:
-        df_dwf_filtered.loc[:, "group"] = df_dwf_filtered["date"].apply(
+        df_dwf.loc[:, "group"] = df_dwf["date"].apply(
             lambda x: "Weekend/Holiday" 
             if (x in bc_holidays or x.weekday() >= 5) 
             else "Workday")
 
-    # Group and calculate mean
-    df_diurnal = df_dwf_filtered.groupby(["group", "time_of_day"], as_index = False)["flow_lps"].mean()
+    # Calculate median value for each timestep in day
+    # Median chosen as less susceptible to outliers
+    df_diurnal = df_dwf.groupby(["group", "time_of_day"], as_index = False)["flow_lps"].median()
     df_diurnal.rename(columns = {"flow_lps": "DWF"}, inplace = True)
     df_diurnal["MNF"] = df_diurnal.groupby("group")["DWF"].transform("min") # Minimum Nighttime Flow (MNF)
     df_diurnal["ADWF"] = df_diurnal.groupby("group")["DWF"].transform("mean") # Average Dry Weather Flow (ADWF)
     df_diurnal["GWI"] = df_diurnal.apply(lambda row: calc_base_flow(row["MNF"], row["ADWF"]), axis = 1) # Ground Water Infiltration
     df_diurnal["SF"] = df_diurnal["DWF"] - df_diurnal["GWI"]
 
-    return df_diurnal, df_dwf_filtered
+    return df_diurnal, df_dwf
 
-def plot_diurnal(df_diurnal, df_dwf_filtered):
+def plot_diurnal(df_diurnal, df_dwf):
     # Get unique groups
     groups = df_diurnal["group"].unique()
 
@@ -240,7 +236,7 @@ def plot_diurnal(df_diurnal, df_dwf_filtered):
     # Loop through each group and plot
     for ax, group in zip(axes, groups):
         subset_diurnal = df_diurnal[df_diurnal["group"] == group]
-        subset_data = df_dwf_filtered[df_dwf_filtered["group"] == group]
+        subset_data = df_dwf[df_dwf["group"] == group]
 
         for date, subgroup in subset_data.groupby("date"):
             ax.plot(subgroup["time_of_day"], subgroup["flow_lps"], color = "grey", alpha = 0.5)

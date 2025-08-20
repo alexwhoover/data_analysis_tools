@@ -11,31 +11,37 @@ from sewer_analysis.core.raw_data import RawData
 from flowworks.client import FlowWorksClient
 
 # %%
+###################################
+# DOWNLOAD DATA FROM FLOWWORKS ####
+###################################
+
 client = FlowWorksClient("ahoover", "Tristan2295!")
 
-# Download data for STC_SAN024 and McCleery Rain Gauge
+site_name = "SOH_408121_US2"
+
+# Download data for SOH_408121_US2 and McCleery Rain Gauge
 raw_flow = client.dl_channel(
-        "STC_SAN024", "Final Flow"
+        site_name, "Final Flow"
     ).rename(columns={"Timestamp": "timestamp", "Final Flow": "flow_lps"})
 raw_rainfall = client.dl_channel(
         "McCleery Golf Course Rain Gauge",
         "FINAL Rainfall", 
-        start_date = "2023-09-01T00:00:00", 
-        end_date = "2025-05-01T00:00:00"
+        start_date = "2024-09-01T00:00:00", 
+        end_date = "2025-06-01T00:00:00"
     ).rename(columns={"Timestamp": "timestamp", "FINAL Rainfall": "rainfall_mm"})
 
-# Convert value dtypes from object to float
-raw_flow['flow_lps'] = pd.to_numeric(raw_flow['flow_lps'], errors='coerce')
-raw_rainfall['rainfall_mm'] = pd.to_numeric(raw_rainfall['rainfall_mm'], errors='coerce')
-
 # %%
-# Create a SiteData object
-raw_data = RawData(raw_flow, raw_rainfall)
+###################################
+# CREATE FLOWSITE OBJECT  #########
+###################################
 
 # Create a FlowSite object
-flow_site = FlowSite("STC_SAN024", raw_data)
+flow_site = FlowSite(site_name, raw_flow, raw_rainfall, separate_fridays = True)
 
 # %%
+###################################
+# ANALYSIS  #######################
+###################################
 # Categorize Flow
 flow_site.categorize_flow(            
     rolling_window_hr = 6,
@@ -46,7 +52,7 @@ flow_site.categorize_flow(
     lead_time_hr = 2
 )
 
-flow_site.plot_categorization()
+#flow_site.plot_categorization()
 
 # %%
 flow_site.calculate_diurnal()

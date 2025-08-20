@@ -4,12 +4,11 @@ from sewer_analysis.core.results_data import ResultsData
 from sewer_analysis.analysis.utils import categorize_flow, plot_categorization, calculate_diurnal, plot_diurnal
 
 class FlowSite:
-    def __init__(self, name: str, raw_data: RawData, separate_fridays: bool = False):
+    def __init__(self, name: str, raw_flow: pd.DataFrame, raw_rainfall: pd.DataFrame, separate_fridays: bool = False):
         self.name = name
-        self.raw_data = raw_data
+        self.raw_data = RawData(raw_flow, raw_rainfall)
         self.results = ResultsData()
         self.separate_fridays = separate_fridays
-        self._selected_dwf_days = pd.Series()
 
     def categorize_flow(
             self,
@@ -45,5 +44,17 @@ class FlowSite:
             raise RuntimeError("You must run calculate_diurnal() before plotting diurnal pattern")
         plot_diurnal(self.results.diurnal_pattern, self.results.dwf_results)
 
-    def calculate_RDII(self):
+    def decompose_flow(self):
+        if self.results.diurnal_pattern is None:
+            raise RuntimeError("You must run calculate_diurnal() before calculating RDII")
         pass
+
+    def plot_decomposition(self):
+        pass
+
+    def RTK_method(self):
+        pass
+
+    def envelope_method(self):
+        pass
+

@@ -135,7 +135,9 @@ class FlowWorksClient:
             "Timestamp": pd.to_datetime(r["DataTime"], format="%Y-%m-%dT%H:%M:%S"),
             value_header: r["DataValue"]
         } for r in resources])
-        
+
+        # Convert the value column to float, coercing errors
+        df[value_header] = pd.to_numeric(df[value_header], errors='coerce')
         return df
     
     def dl_channel(self, site_name, channel_name, **kwargs):
