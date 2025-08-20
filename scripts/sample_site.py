@@ -7,7 +7,6 @@ sys.path.append(r"c:\Git\DataAnalysisTools")
 import pandas as pd
 
 from sewer_analysis.core.flow_site import FlowSite
-from sewer_analysis.core.raw_data import RawData
 from flowworks.client import FlowWorksClient
 
 # %%
@@ -17,7 +16,8 @@ from flowworks.client import FlowWorksClient
 
 client = FlowWorksClient("ahoover", "Tristan2295!")
 
-site_name = "SOH_408121_US2"
+site_name = "STC_SAN024"
+site_area_ha = 47.526
 
 # Download data for SOH_408121_US2 and McCleery Rain Gauge
 raw_flow = client.dl_channel(
@@ -25,9 +25,9 @@ raw_flow = client.dl_channel(
     ).rename(columns={"Timestamp": "timestamp", "Final Flow": "flow_lps"})
 raw_rainfall = client.dl_channel(
         "McCleery Golf Course Rain Gauge",
-        "FINAL Rainfall", 
-        start_date = "2024-09-01T00:00:00", 
-        end_date = "2025-06-01T00:00:00"
+        "FINAL Rainfall",
+        start_date = "2023-09-01T00:00:00", 
+        end_date = "2024-05-01T00:00:00"
     ).rename(columns={"Timestamp": "timestamp", "FINAL Rainfall": "rainfall_mm"})
 
 # %%
@@ -36,7 +36,7 @@ raw_rainfall = client.dl_channel(
 ###################################
 
 # Create a FlowSite object
-flow_site = FlowSite(site_name, raw_flow, raw_rainfall, separate_fridays = False)
+flow_site = FlowSite(site_name, site_area_ha, raw_flow, raw_rainfall, separate_fridays = False)
 
 # Categorize Flow
 flow_site.categorize_flow(            
@@ -50,6 +50,8 @@ flow_site.categorize_flow(
 )
 
 flow_site.calculate_diurnal(plot = False)
-flow_site.decompose_flow(plot = True)
+flow_site.decompose_flow(plot = False)
 
 
+# %%
+flow_site.RTK_method(500, 100)

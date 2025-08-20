@@ -1,11 +1,16 @@
 import pandas as pd
+import numpy as np
 from sewer_analysis.core.raw_data import RawData
 from sewer_analysis.core.results_data import ResultsData
 from sewer_analysis.analysis.utils import categorize_flow, calculate_diurnal, decompose_flow, plot_diurnal, plot_decomposition
+from sewer_analysis.apps.storm_selector_app import run_storm_selector_app
+from sewer_analysis.analysis.RTK_utils import run_RTK
 
 class FlowSite:
-    def __init__(self, name: str, raw_flow: pd.DataFrame, raw_rainfall: pd.DataFrame, separate_fridays: bool = False):
+    def __init__(self, name: str, catchment_area: float, raw_flow: pd.DataFrame, raw_rainfall: pd.DataFrame, separate_fridays: bool = False):
         self.name = name
+        self.catchment_area = catchment_area
+        self.runoff_ratio = None
         self.raw_data = RawData(raw_flow, raw_rainfall)
         self.results = ResultsData()
         self.separate_fridays = separate_fridays
@@ -60,8 +65,36 @@ class FlowSite:
     def _plot_decomposition(self):
         plot_decomposition(self.results.rdii_results)
 
-    def RTK_method(self):
-        pass
+    def _calculate_Ro(self):
+        df_rdii = self.results.rdii_results
+        Q = df_rdii['RDII']
+        P = df_rdii['rainfall_mm']
+
+        # Calculate volume of rain
+        V_rain = np.nansum(P) * (1/1000) * self.catchment_area * 10000 * 1000 # Litres
+
+        # Calculate volume of RDII
+        V_RDII = np.nansum(Q) * 300 # Litres
+
+        # Calculate runoff ratio
+        Ro = V_RDII/V_rain
+
+        return Ro
+    
+    def select_RTK_storms(self):
+        if self.results.rdii_results is None:
+            raise RuntimeError("You must have run decompose_flow() before selecting RTK storms")
+        run_storm_selector_app(self.results.rdii_results)
+
+    def RTK_method(self, pop_size, max_gens):
+        try:
+            selected_storm_dates_df = pd.read_csv("../data/selected_storm_dates.csv", parse_dates=['start_date', 'end_date'])
+        except Exception:
+            raise RuntimeError("No selected storm dates csv found")
+        
+        Ro = self._calculate_Ro()
+        
+        run_RTK(self.results.rdii_results, selected_storm_dates_df, self.catchment_area, Ro, pop_size, max_gens)
 
     def envelope_method(self):
         pass
