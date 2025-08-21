@@ -139,4 +139,4 @@ def run_storm_selector_app(df_rdii):
             return f"Saved {len(periods_df)} periods. You may now close the app."
         return ""
 
-    app.run_server(debug=True)
+    app.run(debug=True)

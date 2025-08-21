@@ -68,7 +68,7 @@ flow_site.select_RTK_storms()
 
 # %%
 # Run genetic algorithm to solve for R, T, K values. Save results in a variable.
-# res = flow_site.RTK_method(250, 100)
+flow_site.RTK_method(250, 100)
 
 # %%
 #Optional, save the results to a pickle file for later use / archiving

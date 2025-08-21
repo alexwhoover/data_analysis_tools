@@ -76,9 +76,9 @@ Interactive storm selection using Dash app:
 Genetic algorithm optimization for RTK parameters:
 - **Variables**: 9 parameters (R1,T1,K1, R2,T2,K2, R3,T3,K3)
 - **Constraints**: 
-  - R ∈ [0,1], T1 ∈ [0.1,2], T2 ∈ [2,12], T3 ∈ [12,72]
+  - R1, R2, R3 ∈ [0,1], 
+  - T1 ∈ [0.1,2], T2 ∈ [2,12], T3 ∈ [12,72]
   - K1 ∈ [2,5], K2 ∈ [1,3], K3 ∈ [0.5,2]
-  - T1 < T2 < T3, K1 > K2 > K3
 - **Objective**: Maximize Kling-Gupta Efficiency (KGE)
 - **Algorithm**: Pymoo GA with SBX crossover and polynomial mutation
 
@@ -132,5 +132,6 @@ Where r = correlation, α = variability ratio, β = bias ratio
 ```bash
 git clone https://github.com/your-repo/DataAnalysisTools.git
 cd DataAnalysisTools
-pip install -r requirements.txt
+conda env create -f environment.yml
+conda activate sewer-analysis
 ```
