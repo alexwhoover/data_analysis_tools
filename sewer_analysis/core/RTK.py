@@ -39,14 +39,18 @@ def fitness_function(x, A, df_rdii):
 class RTKProblem(ElementwiseProblem):
 
     def __init__(self, A: float, df_input: pd.DataFrame, Ro: float):
-        # Define parameter bounds
-        R_bounds = (0, 1)
-        T_bounds = (0, 24)
-        K_bounds = (0, 10)
+        # # Define parameter bounds
+        # R_bounds = (0, 1)
+        # T_bounds = (0, 24)
+        # K_bounds = (0, 10)
         
-        # Combine bounds for all variables
-        xl = np.array([R_bounds[0], T_bounds[0], K_bounds[0], R_bounds[0], T_bounds[0], K_bounds[0], R_bounds[0], T_bounds[0], K_bounds[0]])
-        xu = np.array([R_bounds[1], T_bounds[1], K_bounds[1], R_bounds[1], T_bounds[1], K_bounds[1], R_bounds[1], T_bounds[1], K_bounds[1]])
+        # # Combine bounds for all variables
+        # xl = np.array([R_bounds[0], T_bounds[0], K_bounds[0], R_bounds[0], T_bounds[0], K_bounds[0], R_bounds[0], T_bounds[0], K_bounds[0]])
+        # xu = np.array([R_bounds[1], T_bounds[1], K_bounds[1], R_bounds[1], T_bounds[1], K_bounds[1], R_bounds[1], T_bounds[1], K_bounds[1]])
+
+        # Trying out GHD's RTK constraints
+        xl = np.array([0, 0.1, 2.0, 0, 2.0, 1.0, 0, 12.0, 0.5])
+        xu = np.array([1.0, 2.0, 5.0, 1.0, 12.0, 3.0, 1.0, 72.0, 2.0])
 
         self.df_input = df_input
         self.A = A

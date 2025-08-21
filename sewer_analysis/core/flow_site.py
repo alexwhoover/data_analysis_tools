@@ -2,7 +2,7 @@ import pandas as pd
 import numpy as np
 from sewer_analysis.core.raw_data import RawData
 from sewer_analysis.core.results_data import ResultsData
-from sewer_analysis.analysis.utils import categorize_flow, calculate_diurnal, decompose_flow, plot_diurnal, plot_decomposition
+from sewer_analysis.analysis.utils import categorize_flow, calculate_diurnal, decompose_flow, plot_diurnal, plot_decomposition, calculate_Ro
 from sewer_analysis.apps.storm_selector_app import run_storm_selector_app
 from sewer_analysis.analysis.RTK_utils import run_RTK, plot_simulated_flow_dynamic, plot_synthetic_hydrograph
 
@@ -10,7 +10,6 @@ class FlowSite:
     def __init__(self, name: str, catchment_area: float, raw_flow: pd.DataFrame, raw_rainfall: pd.DataFrame, separate_fridays: bool = False):
         self.name = name
         self.catchment_area = catchment_area
-        self.runoff_ratio = None
         self.raw_data = RawData(raw_flow, raw_rainfall)
         self.results = ResultsData()
         self.separate_fridays = separate_fridays
@@ -38,10 +37,10 @@ class FlowSite:
             plot = plot
         )
 
-    def calculate_diurnal(self, plot = True):
+    def calculate_diurnal(self, smooth_window = 3, plot = True):
         self._check_dwf_results_exist()
         df_input = self.results.dwf_results.copy()
-        self.results.diurnal_pattern = calculate_diurnal(df_input)
+        self.results.diurnal_pattern = calculate_diurnal(df_input, smooth_window)
 
         if plot == True:
             self._plot_diurnal()
@@ -58,6 +57,7 @@ class FlowSite:
         df_diurnal = self.results.diurnal_pattern.copy()
 
         self.results.rdii_results = decompose_flow(df_flow, df_diurnal, self.separate_fridays)
+        self.results.runoff_ratio = self._calculate_Ro()
 
         if plot == True:
             self._plot_decomposition()
@@ -66,22 +66,9 @@ class FlowSite:
         plot_decomposition(self.results.rdii_results)
 
     def _calculate_Ro(self):
-        # Could put this function in RTK_utils.py, but lazy
         self._check_RDII_results_exist()
 
-        df_rdii = self.results.rdii_results
-        Q = df_rdii['RDII']
-        P = df_rdii['rainfall_mm']
-
-        # Calculate volume of rain
-        V_rain = np.nansum(P) * (1/1000) * self.catchment_area * 10000 * 1000 # Litres
-
-        # Calculate volume of RDII
-        V_RDII = np.nansum(Q) * 300 # Litres
-
-        # Calculate runoff ratio
-        Ro = V_RDII/V_rain
-
+        Ro = calculate_Ro(self.results.rdii_results, self.catchment_area)
         return Ro
     
     def select_RTK_storms(self):
@@ -94,7 +81,8 @@ class FlowSite:
         except Exception:
             raise RuntimeError("No selected storm dates csv found")
         
-        Ro = self._calculate_Ro()
+        # Do we want Ro calculated on entire timeseries or just selected periods?
+        Ro = self.results.runoff_ratio
         
         res = run_RTK(self.results.rdii_results, selected_storm_dates_df, self.catchment_area, Ro, pop_size, max_gens)
         self.results.RTK_results = res

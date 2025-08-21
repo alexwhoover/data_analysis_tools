@@ -126,6 +126,22 @@ def _add_time_columns(df):
     df['time_of_day'] = df['timestamp'].dt.strftime('%H:%M')
     df['weekday'] = df['timestamp'].dt.strftime('%A')
 
+
+def calculate_Ro(df_rdii, A):
+    Q = df_rdii['RDII']
+    P = df_rdii['rainfall_mm']
+
+    # Calculate volume of rain
+    V_rain = np.nansum(P) * (1/1000) * A * 10000 * 1000 # Litres
+
+    # Calculate volume of RDII
+    V_RDII = np.nansum(Q) * 300 # Litres
+
+    # Calculate runoff ratio
+    Ro = V_RDII/V_rain
+
+    return Ro
+
 def plot_categorization(df_input):
     # Create figure
     fig = go.Figure()
@@ -257,15 +273,21 @@ def _categorize_days(df, separate_fridays):
     
     return df
 
-def calculate_diurnal(df_dwf: pd.DataFrame):
+def calculate_diurnal(df_dwf: pd.DataFrame, smooth_window = 3):
     # Calculate median value for each timestep in day
     # Median chosen as less susceptible to outliers
     df_diurnal = df_dwf.groupby(["group", "time_of_day"], as_index = False)["flow_lps"].median()
-    df_diurnal.rename(columns = {"flow_lps": "DWF"}, inplace = True)
+    df_diurnal["DWF"] = df_diurnal.groupby("group")["flow_lps"].transform(
+        lambda x: x.rolling(window=smooth_window, center=True, min_periods=1).mean()
+    )    
+    
+    #df_diurnal.rename(columns = {"flow_lps": "DWF"}, inplace = True)
     df_diurnal["MNF"] = df_diurnal.groupby("group")["DWF"].transform("min") # Minimum Nighttime Flow (MNF)
     df_diurnal["ADWF"] = df_diurnal.groupby("group")["DWF"].transform("mean") # Average Dry Weather Flow (ADWF)
     df_diurnal["GWI"] = df_diurnal.apply(lambda row: _calc_base_flow(row["MNF"], row["ADWF"]), axis = 1) # Ground Water Infiltration
     df_diurnal["SF"] = df_diurnal["DWF"] - df_diurnal["GWI"]
+
+    df_diurnal = df_diurnal.drop(columns=['flow_lps'])
 
     return df_diurnal
 
