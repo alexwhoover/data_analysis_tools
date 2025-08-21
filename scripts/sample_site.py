@@ -51,7 +51,7 @@ flow_site.categorize_flow(
     min_event_duration_hr = 1,
     response_time_hr = 72,
     lead_time_hr = 2,
-    plot = False
+    plot = True
 )
 
 # %%
@@ -60,7 +60,7 @@ flow_site.calculate_diurnal(smooth_window = 7, plot = True)
 
 # %%
 # Decompose raw input flow series into its components RDII, GWI, and SF
-flow_site.decompose_flow(plot = False)
+flow_site.decompose_flow(plot = True)
 
 # %%
 # Select storms to fit RTK method to. Storms are saved in data/selected_storm_dates.csv.
