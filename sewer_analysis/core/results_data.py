@@ -3,3 +3,4 @@ class ResultsData:
         self.dwf_results = None
         self.diurnal_pattern = None
         self.rdii_results = None
+        self.RTK_results = None

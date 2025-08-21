@@ -4,7 +4,7 @@ from sewer_analysis.core.raw_data import RawData
 from sewer_analysis.core.results_data import ResultsData
 from sewer_analysis.analysis.utils import categorize_flow, calculate_diurnal, decompose_flow, plot_diurnal, plot_decomposition
 from sewer_analysis.apps.storm_selector_app import run_storm_selector_app
-from sewer_analysis.analysis.RTK_utils import run_RTK
+from sewer_analysis.analysis.RTK_utils import run_RTK, plot_simulated_flow_dynamic, plot_synthetic_hydrograph
 
 class FlowSite:
     def __init__(self, name: str, catchment_area: float, raw_flow: pd.DataFrame, raw_rainfall: pd.DataFrame, separate_fridays: bool = False):
@@ -39,6 +39,7 @@ class FlowSite:
         )
 
     def calculate_diurnal(self, plot = True):
+        self._check_dwf_results_exist()
         df_input = self.results.dwf_results.copy()
         self.results.diurnal_pattern = calculate_diurnal(df_input)
 
@@ -46,14 +47,13 @@ class FlowSite:
             self._plot_diurnal()
 
     def _plot_diurnal(self):
-        if self.results.diurnal_pattern is None or self.results.dwf_results is None:
-            raise RuntimeError("You must run calculate_diurnal() before plotting diurnal pattern")
+        self._check_diurnal_results_exist()
+
         plot_diurnal(self.results.diurnal_pattern, self.results.dwf_results)
 
     def decompose_flow(self, plot = True):
-        if self.results.diurnal_pattern is None:
-            raise RuntimeError("You must run calculate_diurnal() before calculating RDII")
-        
+        self._check_diurnal_results_exist()
+
         df_flow = self.raw_data.data.copy()
         df_diurnal = self.results.diurnal_pattern.copy()
 
@@ -66,6 +66,9 @@ class FlowSite:
         plot_decomposition(self.results.rdii_results)
 
     def _calculate_Ro(self):
+        # Could put this function in RTK_utils.py, but lazy
+        self._check_RDII_results_exist()
+
         df_rdii = self.results.rdii_results
         Q = df_rdii['RDII']
         P = df_rdii['rainfall_mm']
@@ -82,8 +85,7 @@ class FlowSite:
         return Ro
     
     def select_RTK_storms(self):
-        if self.results.rdii_results is None:
-            raise RuntimeError("You must have run decompose_flow() before selecting RTK storms")
+        self._check_RDII_results_exist()
         run_storm_selector_app(self.results.rdii_results)
 
     def RTK_method(self, pop_size, max_gens):
@@ -94,8 +96,42 @@ class FlowSite:
         
         Ro = self._calculate_Ro()
         
-        run_RTK(self.results.rdii_results, selected_storm_dates_df, self.catchment_area, Ro, pop_size, max_gens)
+        res = run_RTK(self.results.rdii_results, selected_storm_dates_df, self.catchment_area, Ro, pop_size, max_gens)
+        self.results.RTK_results = res
+        
+        return res
+    
+    def print_RTK_values(self):
+        res = self.results.RTK_results
+        print("RTK1: %s" % res.X[0:3])
+        print("RTK2: %s" % res.X[3:6])
+        print("RTK3: %s" % res.X[6:9])
+    
+    def plot_simulated_flow(self, save_file = False):
+        self._check_RTK_results_exist()
+        
+        res = self.results.RTK_results
+        plot_simulated_flow_dynamic(self.results.rdii_results, res.X, self.catchment_area, save_file)
+
+    def plot_synthetic_hydrograph(self):
+        self._check_RTK_results_exist()
+
+        res = self.results.RTK_results
+        plot_synthetic_hydrograph(res.X, R_threshold = 0.001)
 
     def envelope_method(self):
         pass
+
+    def _check_dwf_results_exist(self):
+        if self.results.dwf_results is None:
+            raise RuntimeError("You must have DWF results to run this method")
+    def _check_diurnal_results_exist(self):
+        if self.results.diurnal_pattern is None:
+            raise RuntimeError("You must have diurnal pattern results to run this method")
+    def _check_RDII_results_exist(self):
+        if self.results.rdii_results is None:
+            raise RuntimeError("You must have RDII results to run this method")
+    def _check_RTK_results_exist(self):
+        if self.results.RTK_results is None:
+            raise RuntimeError("You must have RTK results to run this method")
 

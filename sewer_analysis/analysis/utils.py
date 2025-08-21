@@ -80,18 +80,24 @@ def categorize_flow(df_input, separate_fridays, rolling_window_hr, min_intensity
     
     return df_dwf
 
+def calculate_IQR(s: pd.Series):
+    Q1 = s.quantile(0.25)
+    Q3 = s.quantile(0.75)
+    IQR = Q3 - Q1
+    lower_bound = Q1 - 1.5 * IQR
+    upper_bound = Q3 + 1.5 * IQR
+
+    return IQR, lower_bound, upper_bound
+
+
 def _filter_dwf(df):
     df = df.copy()
 
     _add_time_columns(df)
 
-    # df['date'] = df['timestamp'].dt.date
-    # df['time_of_day'] = df['timestamp'].dt.strftime('%H:%M')
-    # df['weekday'] = df['timestamp'].dt.strftime('%A')
-
     # Initial manual "guess" from categorize_flow()
     # Identify fully dry days: no wet weather, no missing data, and exactly 288 timesteps (5-min intervals in 24 hrs)
-    full_dry_days = (
+    candidate_dry_days = (
         df.groupby('date')
         .filter(lambda day: 
             day['wet_weather_event'].eq(0).all() and
@@ -103,9 +109,17 @@ def _filter_dwf(df):
     )
 
     # Filter input dataframe to only include fully dry days
-    df = df[df['timestamp'].dt.date.isin(full_dry_days)].copy()
+    df_candidate = df[df['timestamp'].dt.date.isin(candidate_dry_days)].copy()
 
-    return df
+    # Exclude outlier days that do not fit the trend of the rest of the data
+    daily_max_flow = df_candidate.groupby('date')['flow_lps'].max()
+
+    _, lower_bound, upper_bound = calculate_IQR(daily_max_flow)
+
+    non_outlier_days = daily_max_flow[(daily_max_flow >= lower_bound) & (daily_max_flow <= upper_bound)].index.tolist()
+
+    df_dry_days = df[df['timestamp'].dt.date.isin(non_outlier_days)].copy()
+    return df_dry_days
 
 def _add_time_columns(df):
     df['date'] = df['timestamp'].dt.date
