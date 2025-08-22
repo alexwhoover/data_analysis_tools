@@ -13,6 +13,10 @@ class FlowSite:
         self.raw_data = RawData(raw_flow, raw_rainfall)
         self.results = ResultsData()
         self.separate_fridays = separate_fridays
+        
+        # A mask for the raw data for wet periods, as determined from categorize_flow()
+        # Helpful only for calculating runoff ratio
+        self._wet_weather_mask = None 
 
     def categorize_flow(
             self,
@@ -25,7 +29,7 @@ class FlowSite:
             plot = True
     ):
         df_input = self.raw_data.data.copy()
-        self.results.dwf_results = categorize_flow(
+        self.results.dwf_results, self._wet_weather_mask = categorize_flow(
             df_input,
             self.separate_fridays, 
             rolling_window_hr, 
@@ -68,7 +72,8 @@ class FlowSite:
     def _calculate_Ro(self):
         self._check_RDII_results_exist()
 
-        Ro = calculate_Ro(self.results.rdii_results, self.catchment_area)
+        # Only calculate runoff ratio for wet weather periods
+        Ro = calculate_Ro(self.results.rdii_results, self.catchment_area, self._wet_weather_mask)
         return Ro
     
     def select_RTK_storms(self):

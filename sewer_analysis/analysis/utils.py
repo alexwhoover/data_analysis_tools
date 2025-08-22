@@ -64,6 +64,9 @@ def categorize_flow(df_input, separate_fridays, rolling_window_hr, min_intensity
 
     # Add a column showing periods with NA values in flow or precip
     df_input['missing_data'] = (~((~df_input['rainfall_mm'].isnull()) & (~df_input['flow_lps'].isnull()))).astype(int)
+
+    # Create wet weather mask for df_input (for later use in runoff ratio calculation)
+    wet_weather_mask = (df_input['missing_data'] == 0) & (df_input['wet_weather_event'] == 1)
     
     # Plot categorization at this point before further filtering as a QA/QC check
     if plot == True:
@@ -78,7 +81,7 @@ def categorize_flow(df_input, separate_fridays, rolling_window_hr, min_intensity
     # Get rid of intermediate calculation columns
     df_dwf = df_dwf[["timestamp", "date", "time_of_day", "group", "flow_lps"]]
     
-    return df_dwf
+    return df_dwf, wet_weather_mask
 
 def calculate_IQR(s: pd.Series):
     Q1 = s.quantile(0.25)
@@ -97,12 +100,14 @@ def _filter_dwf(df):
 
     # Initial manual "guess" from categorize_flow()
     # Identify fully dry days: no wet weather, no missing data, and exactly 288 timesteps (5-min intervals in 24 hrs)
+    # At least 80% of flow values are non-zero
     candidate_dry_days = (
         df.groupby('date')
         .filter(lambda day: 
             day['wet_weather_event'].eq(0).all() and
             day['missing_data'].eq(0).all() and
-            len(day) == 288
+            len(day) == 288 and
+            (day['flow_lps'] > 0).sum() / len(day) >= 0.8
         )['date']
         .unique()
         .tolist()
@@ -127,10 +132,10 @@ def _add_time_columns(df):
     df['weekday'] = df['timestamp'].dt.strftime('%A')
 
 
-def calculate_Ro(df_rdii, A):
-    Q = df_rdii['RDII']
-    P = df_rdii['rainfall_mm']
-
+def calculate_Ro(df_rdii, A, mask):
+    Q = df_rdii.loc[mask, 'RDII']
+    P = df_rdii.loc[mask, 'rainfall_mm']
+    
     # Calculate volume of rain
     V_rain = np.nansum(P) * (1/1000) * A * 10000 * 1000 # Litres
 
