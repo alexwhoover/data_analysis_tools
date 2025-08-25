@@ -63,7 +63,7 @@ def categorize_flow(df_input, separate_fridays, rolling_window_hr, min_intensity
             current_event_end = current_timestamp
 
     # Add a column showing periods with NA values in flow or precip
-    df_input['missing_data'] = (~((~df_input['rainfall_mm'].isnull()) & (~df_input['flow_lps'].isnull()))).astype(int)
+    df_input['missing_data'] = (~((~df_input['rainfall_mm'].isnull()) & (~df_input['flow_lps'].isnull()) & (df_input['flow_lps'] != 0))).astype(int)
 
     # Create wet weather mask for df_input (for later use in runoff ratio calculation)
     wet_weather_mask = (df_input['missing_data'] == 0) & (df_input['wet_weather_event'] == 1)
@@ -133,9 +133,14 @@ def _add_time_columns(df):
 
 
 def calculate_Ro(df_rdii, A, mask):
+    """
+    Calculates runoff ratio (Ro) as total RDII volume / total rainfall volume
+    for periods with wet weather only.
+    """
+
     Q = df_rdii.loc[mask, 'RDII']
     P = df_rdii.loc[mask, 'rainfall_mm']
-    
+
     # Calculate volume of rain
     V_rain = np.nansum(P) * (1/1000) * A * 10000 * 1000 # Litres
 
