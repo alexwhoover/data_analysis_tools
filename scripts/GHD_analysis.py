@@ -16,25 +16,24 @@ from flowworks.client import FlowWorksClient
 
 client = FlowWorksClient("*****", "*****")
 
-# site_name = "STC_SAN024"
-# site_area_ha = 47.526
-# site_name = "SOH_424879_US2"
-# site_area_ha = 52.492
-site_name = "CHE_406956_US2"
-site_area_ha = 75.578
+site_name = "CHA_SAN004"
+site_area_ha = 31.756574
 
 # Download data for SOH_408121_US2 and McCleery Rain Gauge
 raw_flow = client.dl_channel(
         site_name, "Final Flow"
     ).rename(columns={"Timestamp": "timestamp", "Final Flow": "flow_lps"})
-raw_rainfall = client.dl_channel(
-        "Eric Hamber Secondary Rain Gauge",
-        "FINAL Rainfall",
-        start_date = "2023-09-01T00:00:00", 
-        end_date = "2024-06-01T00:00:00"
-    ).rename(columns={"Timestamp": "timestamp", "FINAL Rainfall": "rainfall_mm"})
+
+print(f"Raw flow timestamp range: {raw_flow['timestamp'].min()} to {raw_flow['timestamp'].max()}")
 
 # %%
+raw_rainfall = client.dl_channel(
+    "Champlain Heights Community Centre Rain Gauge",
+    "FINAL Rainfall",
+    start_date = raw_flow['timestamp'].min().strftime('%Y-%m-%dT%H:%M:%S'), 
+    end_date = raw_flow['timestamp'].max().strftime('%Y-%m-%dT%H:%M:%S')
+    ).rename(columns={"Timestamp": "timestamp", "FINAL Rainfall": "rainfall_mm"})
+
 ###################################
 # ANALYSIS  #######################
 ###################################
@@ -62,27 +61,5 @@ flow_site.calculate_diurnal(smooth_window = 7, plot = True)
 # Decompose raw input flow series into its components RDII, GWI, and SF
 flow_site.decompose_flow(plot = True)
 
-# %%
-# Select storms to fit RTK method to. Storms are saved in data/selected_storm_dates.csv.
-flow_site.select_RTK_storms()
-
-# %%
-# Run genetic algorithm to solve for R, T, K values. Save results in a variable.
-flow_site.RTK_method(250, 100)
-
-# %%
-#Optional, save the results to a pickle file for later use / archiving
-import pickle
-# with open('sample_res_CHE_406956_US2.pkl', 'wb') as f:
-#     pickle.dump(res, f)
-
-with open('sample_res_CHE_406956_US2.pkl', 'rb') as f:
-    res = pickle.load(f)
-
-# %%
-flow_site.print_RTK_values()
-# %%
-flow_site.plot_synthetic_hydrograph()
-# %%
-flow_site.plot_simulated_flow()
+print(flow_site.results.runoff_ratio)
 # %%
